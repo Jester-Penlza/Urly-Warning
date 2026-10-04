@@ -1639,6 +1639,28 @@ function initScanner() {
       row.appendChild(lbl);
       row.appendChild(val);
       body.appendChild(row);
+      return row;
+    }
+
+    function addDetailButton(label, value, onClick, extraClass) {
+      const row = document.createElement('div');
+      row.className = 'scanner-result__row scanner-result__row--interactive ' + (extraClass || '');
+
+      const lbl = document.createElement('span');
+      lbl.className = 'scanner-result__label';
+      lbl.textContent = label + ':';
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'scanner-result__detail-button';
+      button.textContent = value;
+      button.setAttribute('aria-label', `${label}: ${value}. Open details`);
+      button.addEventListener('click', onClick);
+
+      row.appendChild(lbl);
+      row.appendChild(button);
+      body.appendChild(row);
+      return row;
     }
 
     addDetail('Protocol', item.isHttps ? 'HTTPS' : 'HTTP');
@@ -1683,8 +1705,26 @@ function initScanner() {
     }
     
     addDetail('Category', item.category || 'Unknown');
-    addDetail('External links', typeof item.externalLinks === 'number' ? item.externalLinks : 'Unknown');
-    addDetail('Risk score', `${item.risk} (${item.status.toUpperCase()})`, 'row--risk');
+
+    const externalLinksData = item.localScan?.externalLinks || {
+      count: typeof item.externalLinks === 'number' ? item.externalLinks : null,
+      links: []
+    };
+    const externalLinksLabel = typeof externalLinksData.count === 'number'
+      ? `${externalLinksData.count} — view details`
+      : 'Unavailable — learn why';
+    addDetailButton(
+      'External links',
+      externalLinksLabel,
+      () => showExternalLinksModal(externalLinksData)
+    );
+
+    addDetailButton(
+      'Risk score',
+      `${item.risk} (${item.status.toUpperCase()}) — view full breakdown`,
+      () => showRiskScoreModal(item),
+      'row--risk'
+    );
     addDetail('Scanned at', item.scannedAt || 'Unknown');
   const grouped = groupReasons(item.reasons || []);
   const summaryParts = [];
@@ -1766,7 +1806,10 @@ function initScanner() {
 
         item.localScan.scoreBreakdown.forEach((entry) => {
           const breakdownItem = document.createElement('div');
-          breakdownItem.className = `breakdown-item breakdown-item--${entry.status || 'safe'}`;
+          breakdownItem.className = `breakdown-item breakdown-item--clickable breakdown-item--${entry.status || 'safe'}`;
+          breakdownItem.tabIndex = 0;
+          breakdownItem.setAttribute('role', 'button');
+          breakdownItem.setAttribute('aria-label', `Open ${entry.category || 'security check'} details`);
 
           const label = document.createElement('div');
           label.className = 'breakdown-label';
@@ -1782,18 +1825,37 @@ function initScanner() {
           detail.textContent = flags.length ? flags.join(', ') : (entry.description || 'No issues found');
 
           breakdownItem.append(label, score, detail);
+          const openEntry = () => showBreakdownEntryModal(entry, item);
+          breakdownItem.addEventListener('click', openEntry);
+          breakdownItem.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openEntry();
+            }
+          });
           breakdownGrid.appendChild(breakdownItem);
         });
       } else {
       // Heuristics Score
       if (item.localScan.heuristics && !item.localScan.heuristics.skipped) {
         const heuristicItem = document.createElement('div');
-        heuristicItem.className = 'breakdown-item';
+        heuristicItem.className = 'breakdown-item breakdown-item--clickable';
+        heuristicItem.tabIndex = 0;
+        heuristicItem.setAttribute('role', 'button');
+        heuristicItem.setAttribute('aria-label', 'Open heuristic analysis details');
         heuristicItem.innerHTML = `
           <div class="breakdown-label">🧠 Heuristic Analysis</div>
           <div class="breakdown-score">${item.localScan.heuristics.score || 0} points</div>
           <div class="breakdown-detail">Flags: ${(item.localScan.heuristics.flags || []).length}</div>
         `;
+        const openHeuristics = () => showHeuristicDetailsModal(item.localScan.heuristics);
+        heuristicItem.addEventListener('click', openHeuristics);
+        heuristicItem.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openHeuristics();
+          }
+        });
         breakdownGrid.appendChild(heuristicItem);
       }
       
@@ -3080,6 +3142,306 @@ function createScanResultEffects(isUnsafe) {
       flash.remove();
     }
   }, 400);
+}
+
+// ============== Detailed scan breakdown dialogs ==============
+// These dialogs intentionally build their contents with textContent instead of
+// interpolating scanner data into HTML. URLs and server responses are untrusted.
+const HEURISTIC_FLAG_DETAILS = Object.freeze({
+  httpnotencrypted: ['HTTP not encrypted', 'The address uses HTTP instead of HTTPS.'],
+  ipliteralhost: ['IP address host', 'The URL uses a raw IP address instead of a domain name.'],
+  punycodehost: ['Punycode / internationalized domain', 'The hostname contains encoded international characters that can be used for lookalike domains.'],
+  suspicioustld: ['Suspicious top-level domain', 'The domain ending is frequently seen in low-trust or short-lived sites.'],
+  manysubdomains: ['Many subdomains', 'An unusually deep hostname can be used to disguise the real registered domain.'],
+  manyhyphens: ['Many hyphens', 'Excessive hyphens can indicate a lookalike or misleading hostname.'],
+  longhostname: ['Long hostname', 'The hostname is unusually long and may be designed to hide important parts of the address.'],
+  longurl: ['Long URL', 'The full address is unusually long and deserves closer review.'],
+  suspiciousport: ['Unusual port', 'The address uses a non-standard network port.'],
+  manyencodedchars: ['Heavy URL encoding', 'The address contains many encoded characters that can obscure its destination.'],
+  linkshortener: ['Link shortener', 'A shortened link hides the final destination until it is opened.'],
+  phishykeywords: ['Phishing-related wording', 'The address contains words frequently used in account, login, verification, or reward scams.'],
+  tldhelpwithrewardpattern: ['Suspicious reward pattern', 'A low-trust domain ending appears together with reward-related wording.'],
+  typosquatleetspeak: ['Possible typosquatting', 'The hostname may imitate a familiar name using misspellings or character substitutions.'],
+  domainnotfound: ['Domain not found', 'DNS could not resolve the hostname. The address may be mistyped, expired, or fabricated.']
+});
+
+function normalizeFlagKey(flag) {
+  return String(flag || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function createDetailsModal(title, subtitle) {
+  document.querySelectorAll('.details-modal-overlay').forEach((existing) => existing.remove());
+
+  const previouslyFocused = document.activeElement;
+  const previousOverflow = document.body.style.overflow;
+  const overlay = document.createElement('div');
+  overlay.className = 'details-modal-overlay';
+
+  const dialog = document.createElement('section');
+  dialog.className = 'details-modal';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'scanDetailsModalTitle');
+  dialog.tabIndex = -1;
+
+  const header = document.createElement('div');
+  header.className = 'details-modal__header';
+
+  const headingGroup = document.createElement('div');
+  const heading = document.createElement('h2');
+  heading.id = 'scanDetailsModalTitle';
+  heading.className = 'details-modal__title';
+  heading.textContent = title;
+  headingGroup.appendChild(heading);
+
+  if (subtitle) {
+    const description = document.createElement('p');
+    description.className = 'details-modal__subtitle';
+    description.textContent = subtitle;
+    headingGroup.appendChild(description);
+  }
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'details-modal__close';
+  closeButton.textContent = '×';
+  closeButton.setAttribute('aria-label', 'Close scan details');
+
+  const body = document.createElement('div');
+  body.className = 'details-modal__body';
+
+  header.append(headingGroup, closeButton);
+  dialog.append(header, body);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKeyDown);
+    overlay.classList.add('details-modal-overlay--closing');
+    window.setTimeout(() => {
+      overlay.remove();
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
+    }, 160);
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') close();
+  };
+
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKeyDown);
+  window.requestAnimationFrame(() => dialog.focus());
+
+  return { body, close };
+}
+
+function appendMetric(parent, label, value, tone) {
+  const metric = document.createElement('div');
+  metric.className = `details-metric${tone ? ` details-metric--${tone}` : ''}`;
+  const labelElement = document.createElement('span');
+  labelElement.className = 'details-metric__label';
+  labelElement.textContent = label;
+  const valueElement = document.createElement('strong');
+  valueElement.className = 'details-metric__value';
+  valueElement.textContent = String(value ?? 'Unknown');
+  metric.append(labelElement, valueElement);
+  parent.appendChild(metric);
+}
+
+function appendDetailCard(parent, title, score, description, status) {
+  const card = document.createElement('article');
+  card.className = `details-card details-card--${status || 'neutral'}`;
+  const cardHeader = document.createElement('div');
+  cardHeader.className = 'details-card__header';
+  const heading = document.createElement('h3');
+  heading.textContent = title || 'Security check';
+  const scoreElement = document.createElement('span');
+  scoreElement.className = 'details-card__score';
+  scoreElement.textContent = score;
+  const text = document.createElement('p');
+  text.textContent = description || 'No additional information was returned.';
+  cardHeader.append(heading, scoreElement);
+  card.append(cardHeader, text);
+  parent.appendChild(card);
+  return card;
+}
+
+function getFlagPresentation(flag) {
+  const rawName = typeof flag === 'object' && flag !== null ? (flag.name || flag.code || flag.flag) : flag;
+  const fallbackName = String(rawName || 'Detected risk factor').replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const known = HEURISTIC_FLAG_DETAILS[normalizeFlagKey(rawName)];
+  return {
+    name: known?.[0] || fallbackName,
+    description: (typeof flag === 'object' && flag !== null && flag.description) || known?.[1] || 'The scanner marked this characteristic for review.',
+    points: typeof flag === 'object' && flag !== null && Number.isFinite(Number(flag.points)) ? Number(flag.points) : null
+  };
+}
+
+function showHeuristicDetailsModal(heuristics) {
+  const data = heuristics || {};
+  const flags = Array.isArray(data.flags) ? data.flags : [];
+  const score = Number.isFinite(Number(data.score)) ? Number(data.score) : 0;
+  const risk = String(data.risk || (score >= 35 ? 'high' : score >= 18 ? 'medium' : 'low')).toLowerCase();
+  const modal = createDetailsModal('Heuristic analysis', 'URL characteristics detected before opening the site.');
+
+  const summary = document.createElement('div');
+  summary.className = 'details-metrics';
+  appendMetric(summary, 'Risk points', `${score}`, risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'safe');
+  appendMetric(summary, 'Risk level', risk.toUpperCase(), risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'safe');
+  appendMetric(summary, 'Flags found', flags.length);
+  modal.body.appendChild(summary);
+
+  const list = document.createElement('div');
+  list.className = 'details-card-list';
+  if (flags.length) {
+    flags.forEach((flag) => {
+      const detail = getFlagPresentation(flag);
+      appendDetailCard(list, detail.name, detail.points === null ? 'Flagged' : `+${detail.points} points`, detail.description, detail.points >= 30 ? 'danger' : detail.points >= 10 ? 'warning' : 'neutral');
+    });
+  } else {
+    appendDetailCard(list, 'No heuristic flags', '0 flags', 'The URL structure did not trigger the scanner’s heuristic rules.', 'safe');
+  }
+  modal.body.appendChild(list);
+}
+
+function showExternalLinksModal(externalLinksData) {
+  const data = externalLinksData || {};
+  const links = Array.isArray(data.links) ? data.links : [];
+  const count = typeof data.count === 'number' ? data.count : links.length || null;
+  const modal = createDetailsModal('External links', 'Links on the scanned page that lead to another hostname.');
+
+  const summary = document.createElement('div');
+  summary.className = 'details-metrics';
+  appendMetric(summary, 'Detected', count === null ? 'Unavailable' : count);
+  appendMetric(summary, 'Listed', links.length);
+  modal.body.appendChild(summary);
+
+  if (data.skipped || data.error) {
+    appendDetailCard(
+      modal.body,
+      data.skipped ? 'Content analysis was skipped' : 'Content analysis was incomplete',
+      'Info',
+      data.error || 'The page content was not fetched, so individual external links are unavailable.',
+      'neutral'
+    );
+  }
+
+  if (!links.length) {
+    if (!data.skipped && !data.error) {
+      appendDetailCard(modal.body, count === 0 ? 'No external links detected' : 'Link list unavailable', count === 0 ? 'Clear' : 'Info', count === 0 ? 'No links to a different hostname were returned by the scan.' : 'Only the total count was available for this scan.', count === 0 ? 'safe' : 'neutral');
+    }
+    return;
+  }
+
+  const list = document.createElement('ol');
+  list.className = 'details-link-list';
+  links.forEach((linkValue) => {
+    try {
+      const parsed = new URL(String(linkValue));
+      if (!['http:', 'https:'].includes(parsed.protocol)) return;
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = parsed.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = parsed.href;
+      item.appendChild(link);
+      list.appendChild(item);
+    } catch (_) {
+      // Ignore malformed values returned by a remote page.
+    }
+  });
+  modal.body.appendChild(list);
+}
+
+function showBreakdownEntryModal(entry, scanData) {
+  if (entry?.category === 'Heuristic Analysis' && scanData?.localScan?.heuristics) {
+    showHeuristicDetailsModal(scanData.localScan.heuristics);
+    return;
+  }
+
+  const title = entry?.category || 'Security check';
+  const modal = createDetailsModal(title, 'How this check contributed to the final scan result.');
+  const points = Number(entry?.points) || 0;
+  const status = String(entry?.status || (points > 0 ? 'warning' : 'safe')).toLowerCase();
+  const summary = document.createElement('div');
+  summary.className = 'details-metrics';
+  appendMetric(summary, 'Risk points', points, status === 'unsafe' || status === 'danger' ? 'danger' : status === 'warning' || status === 'caution' ? 'warning' : 'safe');
+  appendMetric(summary, 'Check status', status.toUpperCase());
+  modal.body.appendChild(summary);
+  appendDetailCard(modal.body, title, `${points} risk points`, entry?.description || 'No issue was reported by this check.', status);
+
+  const flags = Array.isArray(entry?.flags) ? entry.flags : [];
+  if (flags.length) {
+    const flagList = document.createElement('div');
+    flagList.className = 'details-card-list';
+    flags.forEach((flag) => {
+      const detail = getFlagPresentation(flag);
+      appendDetailCard(flagList, detail.name, detail.points === null ? 'Flagged' : `+${detail.points} points`, detail.description, 'warning');
+    });
+    modal.body.appendChild(flagList);
+  }
+}
+
+function showRiskScoreModal(scanData) {
+  const data = scanData || {};
+  const local = data.localScan || {};
+  const safety = Number.isFinite(Number(data.safetyRating)) ? Number(data.safetyRating) : null;
+  const status = String(data.status || 'unknown').toLowerCase();
+  const modal = createDetailsModal('Complete scan breakdown', 'Every check returned for this scan, shown on one consistent risk-point scale.');
+
+  const summary = document.createElement('div');
+  summary.className = 'details-metrics details-metrics--primary';
+  appendMetric(summary, 'Safety rating', safety === null ? 'Unknown' : `${safety}%`, safety !== null && safety >= 70 ? 'safe' : safety !== null && safety >= 30 ? 'warning' : 'danger');
+  appendMetric(summary, 'Risk score', Number.isFinite(Number(data.risk)) ? Number(data.risk) : 'Unknown', status === 'unsafe' ? 'danger' : status === 'caution' ? 'warning' : 'safe');
+  appendMetric(summary, 'Verdict', status.toUpperCase(), status === 'unsafe' ? 'danger' : status === 'caution' ? 'warning' : 'safe');
+  appendMetric(summary, 'Category', data.category || 'Unknown');
+  modal.body.appendChild(summary);
+
+  const breakdown = Array.isArray(local.scoreBreakdown) ? local.scoreBreakdown : [];
+  const list = document.createElement('div');
+  list.className = 'details-card-list';
+  if (breakdown.length) {
+    breakdown.forEach((entry) => {
+      const points = Number(entry?.points) || 0;
+      const entryStatus = String(entry?.status || (points > 0 ? 'warning' : 'safe')).toLowerCase();
+      const flags = Array.isArray(entry?.flags) ? entry.flags : [];
+      const flagSummary = flags.map((flag) => getFlagPresentation(flag).name).join(', ');
+      appendDetailCard(list, entry?.category || 'Security check', `${points} risk points`, flagSummary || entry?.description || 'No issue found.', entryStatus);
+    });
+  } else if (local.heuristics || local.blocklist || local.gsb || local.dns || local.tls) {
+    if (local.heuristics && !local.heuristics.skipped) appendDetailCard(list, 'Heuristic analysis', `${Number(local.heuristics.score) || 0} risk points`, `${Array.isArray(local.heuristics.flags) ? local.heuristics.flags.length : 0} URL flags detected.`, (Number(local.heuristics.score) || 0) > 0 ? 'warning' : 'safe');
+    if (local.gsb?.enabled) appendDetailCard(list, 'Google Safe Browsing', local.gsb.verdict === 'unsafe' ? '100 risk points' : '0 risk points', `Verdict: ${local.gsb.verdict || 'unknown'}.`, local.gsb.verdict === 'unsafe' ? 'danger' : local.gsb.verdict === 'safe' ? 'safe' : 'neutral');
+    if (local.blocklist) appendDetailCard(list, 'Local blocklist', local.blocklist.match ? '100 risk points' : '0 risk points', local.blocklist.match ? 'A blocklist match was found.' : 'No blocklist match was found.', local.blocklist.match ? 'danger' : 'safe');
+    if (local.dns && !local.dns.skipped) appendDetailCard(list, 'DNS lookup', local.dns.ok ? '0 risk points' : 'Check failed', local.dns.ok ? 'The hostname resolved successfully.' : (local.dns.error || 'The hostname did not resolve.'), local.dns.ok ? 'safe' : 'danger');
+    if (local.tls && !local.tls.skipped) appendDetailCard(list, 'SSL / TLS', local.tls.error ? 'Unavailable' : local.tls.ok ? '0 risk points' : 'Check failed', local.tls.error || (local.tls.ok ? 'The certificate check passed.' : 'The certificate check failed.'), local.tls.error ? 'neutral' : local.tls.ok ? 'safe' : 'danger');
+  } else {
+    appendDetailCard(list, 'Browser-only scan', 'Limited detail', 'The local scanner API was unavailable, so this result uses URL and browser-side checks only.', 'neutral');
+  }
+  modal.body.appendChild(list);
+
+  const reasons = Array.isArray(data.reasons) ? data.reasons.filter(Boolean) : [];
+  if (reasons.length) {
+    const reasonsSection = document.createElement('section');
+    reasonsSection.className = 'details-reasons';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Why this verdict was shown';
+    const reasonList = document.createElement('ul');
+    reasons.forEach((reason) => {
+      const item = document.createElement('li');
+      item.textContent = String(reason);
+      reasonList.appendChild(item);
+    });
+    reasonsSection.append(heading, reasonList);
+    modal.body.appendChild(reasonsSection);
+  }
 }
 
 // Enhanced page status function with visual effects (OPTIMIZED)
