@@ -1,6 +1,9 @@
 /**
  * Configuration Panel Component
  * Full configuration UI for URL Scanner
+ * 
+ * Detection Sensitivity Note: Slider shows 25%-200% for visual feedback,
+ * but values above 150% are capped at 150% for safety (prevents false positives)
  */
 
 import React, { useState } from 'react';
@@ -8,7 +11,7 @@ import { useConfig } from '../config/useConfig';
 import './ConfigPanel.css';
 
 export default function ConfigPanel({ isOpen, onClose }) {
-  const { config, updateConfig, updateConfigs, resetConfig, exportConfig, importConfig } = useConfig();
+  const { config, updateConfig, resetConfig, exportConfig, importConfig } = useConfig();
   const [activeTab, setActiveTab] = useState('scanning');
 
   const handleToggle = (path) => {
@@ -24,6 +27,31 @@ export default function ConfigPanel({ isOpen, onClose }) {
   };
 
   const handleTextChange = (path, value) => {
+    // Special handling for colorScheme to sync with theme toggle
+    if (path === 'display.colorScheme') {
+      // Clear manual theme preference when Color Scheme is changed
+      // This allows the config colorScheme to take effect
+      localStorage.removeItem('themePreference');
+      localStorage.removeItem('themePreference_timestamp');
+      
+      // Apply theme immediately
+      const body = document.body;
+      body.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+      
+      if (value === 'light') {
+        body.classList.add('theme-light');
+        body.style.colorScheme = 'light';
+      } else if (value === 'dark') {
+        body.classList.add('theme-dark');
+        body.style.colorScheme = 'dark';
+      } else if (value === 'auto') {
+        body.classList.add('theme-auto');
+        body.style.colorScheme = 'light dark';
+      }
+      
+      console.log('🎨 Color Scheme changed via config:', value);
+    }
+    
     updateConfig(path, value);
   };
 
@@ -57,21 +85,29 @@ export default function ConfigPanel({ isOpen, onClose }) {
     typosquat: 14
   };
 
-  // Get current sensitivity level (0-200%)
-  const getSensitivityLevel = () => {
+  // State to track slider display value (can be 25-200%)
+  const [sliderValue, setSliderValue] = React.useState(() => {
     const currentHttpWeight = getConfigValue('heuristics.weights.httpNotEncrypted') || 100;
     const baseWeight = defaultWeights.httpNotEncrypted;
     const sensitivity = Math.round((currentHttpWeight / baseWeight) * 100);
     return Math.max(25, Math.min(200, sensitivity));
+  });
+
+  // Get current sensitivity level (25-200% display, but capped at 150% for calculation)
+  const getSensitivityLevel = () => {
+    return sliderValue; // Return the stored slider value
   };
 
   // Handle sensitivity change - adjusts all weights proportionally
+  // Values above 150% are capped at 150% for safety (prevents false positives)
   const handleSensitivityChange = (multiplier) => {
-    const updates = Object.fromEntries(Object.entries(defaultWeights).map(([key, baseValue]) => [
-      `heuristics.weights.${key}`,
-      Math.round(baseValue * multiplier)
-    ]));
-    updateConfigs(updates);
+    // Cap the actual multiplier at 1.5 (150%), even if slider shows 200%
+    const cappedMultiplier = Math.min(multiplier, 1.5);
+    
+    Object.entries(defaultWeights).forEach(([key, baseValue]) => {
+      const newValue = Math.round(baseValue * cappedMultiplier);
+      updateConfig(`heuristics.weights.${key}`, newValue);
+    });
   };
 
   // Get description based on sensitivity level
@@ -107,9 +143,11 @@ export default function ConfigPanel({ isOpen, onClose }) {
         level: 'strict'
       };
     } else {
+      // For 150%+ (including display values up to 200%)
+      const note = level > 150 ? ' (Capped at 150% for safety)' : '';
       return {
         title: '🔴 Maximum Security',
-        description: 'Aggressive detection. High false positive rate. Use for unknown/suspicious links only.',
+        description: `Aggressive detection. High false positive rate. Use for unknown/suspicious links only.${note}`,
         color: '#dc3545',
         level: 'maximum'
       };
@@ -178,12 +216,6 @@ export default function ConfigPanel({ isOpen, onClose }) {
         >
           🎨 Display
         </button>
-        <button 
-          className={activeTab === 'advanced' ? 'active' : ''}
-          onClick={() => setActiveTab('advanced')}
-        >
-          ⚡ Advanced
-        </button>
       </div>
 
       <div className="config-content">
@@ -218,30 +250,6 @@ export default function ConfigPanel({ isOpen, onClose }) {
 
             <div className="config-item">
               <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('scanning.enableContentAnalysis')}
-                  onChange={() => handleToggle('scanning.enableContentAnalysis')}
-                />
-                Enable Content Analysis
-              </label>
-              <p className="config-help">Analyze webpage content for threats</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('scanning.followRedirects')}
-                  onChange={() => handleToggle('scanning.followRedirects')}
-                />
-                Follow Redirects
-              </label>
-              <p className="config-help">Check final destination of redirected URLs</p>
-            </div>
-
-            <div className="config-item">
-              <label>
                 Max Batch Size
                 <input
                   type="number"
@@ -252,34 +260,6 @@ export default function ConfigPanel({ isOpen, onClose }) {
                 />
               </label>
               <p className="config-help">Maximum URLs to scan at once</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                Max Concurrent Requests
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={getConfigValue('scanning.maxConcurrentRequests')}
-                  onChange={(e) => handleNumberChange('scanning.maxConcurrentRequests', e.target.value)}
-                />
-              </label>
-              <p className="config-help">Parallel scanning requests</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                Max Redirects
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  value={getConfigValue('scanning.maxRedirects')}
-                  onChange={(e) => handleNumberChange('scanning.maxRedirects', e.target.value)}
-                />
-              </label>
-              <p className="config-help">Maximum redirect chain length</p>
             </div>
           </div>
         )}
@@ -298,19 +278,7 @@ export default function ConfigPanel({ isOpen, onClose }) {
                 />
                 Enable Google Safe Browsing
               </label>
-              <p className="config-help">Use Google's threat database for known malicious sites</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('heuristics.enabled')}
-                  onChange={() => handleToggle('heuristics.enabled')}
-                />
-                Enable Heuristic Analysis
-              </label>
-              <p className="config-help">Pattern-based URL analysis (17 detection parameters)</p>
+              <p className="config-help">Use Google Safe Browsing threat intelligence for known malicious sites</p>
             </div>
 
             <div className="detection-sensitivity-container">
@@ -323,31 +291,31 @@ export default function ConfigPanel({ isOpen, onClose }) {
 
               <div className="sensitivity-presets">
                 <button 
-                  onClick={() => handleSensitivityChange(0.5)}
+                  onClick={() => { setSliderValue(50); handleSensitivityChange(0.5); }}
                   className="preset-btn preset-relaxed"
                 >
                   🟢 Relaxed (50%)
                 </button>
                 <button 
-                  onClick={() => handleSensitivityChange(0.75)}
+                  onClick={() => { setSliderValue(75); handleSensitivityChange(0.75); }}
                   className="preset-btn preset-balanced"
                 >
                   🟡 Balanced (75%)
                 </button>
                 <button 
-                  onClick={() => handleSensitivityChange(1.0)}
+                  onClick={() => { setSliderValue(100); handleSensitivityChange(1.0); }}
                   className="preset-btn preset-normal"
                 >
                   ✅ Normal (100%)
                 </button>
                 <button 
-                  onClick={() => handleSensitivityChange(1.25)}
+                  onClick={() => { setSliderValue(125); handleSensitivityChange(1.25); }}
                   className="preset-btn preset-strict"
                 >
                   🟠 Strict (125%)
                 </button>
                 <button 
-                  onClick={() => handleSensitivityChange(1.5)}
+                  onClick={() => { setSliderValue(150); handleSensitivityChange(1.5); }}
                   className="preset-btn preset-maximum"
                 >
                   🔴 Maximum (150%)
@@ -360,8 +328,14 @@ export default function ConfigPanel({ isOpen, onClose }) {
                   min="25"
                   max="200"
                   step="5"
-                  value={getSensitivityLevel()}
-                  onChange={(e) => handleSensitivityChange(parseInt(e.target.value) / 100)}
+                  value={sliderValue}
+                  onChange={(e) => {
+                    // Allow slider to 200%, but cap actual calculation at 150% for safety
+                    const newSliderValue = parseInt(e.target.value);
+                    setSliderValue(newSliderValue); // Update display value
+                    const actualValue = Math.min(newSliderValue, 150); // Cap calculation
+                    handleSensitivityChange(actualValue / 100);
+                  }}
                   className="sensitivity-slider"
                 />
                 <div className="slider-labels">
@@ -473,105 +447,6 @@ export default function ConfigPanel({ isOpen, onClose }) {
                 Show Performance Metrics
               </label>
               <p className="config-help">Display scan speed and timing</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('display.animateResults')}
-                  onChange={() => handleToggle('display.animateResults')}
-                />
-                Animate Results
-              </label>
-              <p className="config-help">Smooth transitions and animations</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                Color Scheme
-                <select
-                  value={getConfigValue('display.colorScheme')}
-                  onChange={(e) => handleTextChange('display.colorScheme', e.target.value)}
-                >
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="auto">Auto (System)</option>
-                </select>
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* Advanced Tab */}
-        {activeTab === 'advanced' && (
-          <div className="config-section">
-            <h3>Advanced Settings</h3>
-            
-            <div className="config-item">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('performance.enableCaching')}
-                  onChange={() => handleToggle('performance.enableCaching')}
-                />
-                Enable Result Caching
-              </label>
-              <p className="config-help">Cache scan results to improve performance</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                Cache Expiry (minutes)
-                <input
-                  type="number"
-                  min="1"
-                  max="1440"
-                  value={getConfigValue('performance.cacheExpiry') / 60000}
-                  onChange={(e) => handleNumberChange('performance.cacheExpiry', parseInt(e.target.value) * 60000)}
-                />
-              </label>
-              <p className="config-help">How long to keep cached results</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                API Timeout (seconds)
-                <input
-                  type="number"
-                  min="5"
-                  max="60"
-                  value={getConfigValue('api.timeout') / 1000}
-                  onChange={(e) => handleNumberChange('api.timeout', parseInt(e.target.value) * 1000)}
-                />
-              </label>
-              <p className="config-help">Maximum time to wait for scan results</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                Retry Attempts
-                <input
-                  type="number"
-                  min="0"
-                  max="5"
-                  value={getConfigValue('api.retryAttempts')}
-                  onChange={(e) => handleNumberChange('api.retryAttempts', e.target.value)}
-                />
-              </label>
-              <p className="config-help">Number of times to retry failed requests</p>
-            </div>
-
-            <div className="config-item">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={getConfigValue('advanced.enableLogging')}
-                  onChange={() => handleToggle('advanced.enableLogging')}
-                />
-                Enable Console Logging
-              </label>
-              <p className="config-help">Log debug information to browser console</p>
             </div>
           </div>
         )}

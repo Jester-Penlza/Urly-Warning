@@ -18,6 +18,7 @@
         </a>
         <div class="header__navigation">
           <div class="header__menu menu">
+            <nav class="menu__body">
               <nav class="menu__body">
                 <ul class="menu__list">
                   <li class="menu__item"><a href="index.html" class="menu__link">Home</a></li>
@@ -30,7 +31,7 @@
           </div>
           <div class="header__actions actions-header">
             <button type="button" id="themeToggle" class="actions-header__button" aria-label="Toggle dark mode">Dark</button>
-            <button type="button" class="menu__icon icon-menu" aria-label="Toggle navigation menu" aria-expanded="false"><span></span></button>
+            <button type="button" class="menu__icon icon-menu"><span></span></button>
           </div>
         </div>
       </div>
@@ -47,20 +48,54 @@
       <section class="page__contact contact">
         <div class="contact__container">
           <div class="contact__contacts">
-            <h2 class="contact__title">Privacy-first contact</h2>
-            <div class="contact__text">
-              <p>Direct phone, email, address, and social details are not published in this public demo.</p>
+            <h2 class="contact__title">You can find us at</h2>
+            <div class="contact__connect connect-contact">
+              <a type="tel:09294098323" href="tel:09294098323" class="connect-contact__item">
+                <div class="connect-contact__icon"><img src="/img/contact/phone.svg" alt="ico" /></div>
+                <div class="connect-contact__content">
+                  <h3 class="connect-contant__type">Phone</h3>
+                  <div class="connect-contact__label">09294098323</div>
+                </div>
+              </a>
+              <a type="mailto:urlywarning@gmail.com" href="mailto:urlywarning@gmail.com" class="connect-contact__item">
+                <div class="connect-contact__icon"><img src="/img/contact/email.svg" alt="ico" /></div>
+                <div class="connect-contact__content">
+                  <h3 class="connect-contant__type">Email</h3>
+                  <div class="connect-contact__label">urlywarning@gmail.com</div>
+                </div>
+              </a>
+              <a href="https://www.google.com/maps/search/?api=1&query=Complex%2C%20SM%20Baliwag%2C%20Do%C3%B1a%20Remedios%20Trinidad%20Hwy%2C%20Baliwag%2C%20Bulacan"
+                class="connect-contact__item">
+                <div class="connect-contact__icon"><img src="/img/contact/address.svg" alt="ico" /></div>
+                <div class="connect-contact__content">
+                  <h3 class="connect-contant__type">Address</h3>
+                  <div class="connect-contact__label">Complex, SM Baliwag, Doña Remedios Trinidad Hwy, Baliwag, Bulacan</div>
+                </div>
+              </a>
+            </div>
+            <div class="contact__links">
+              <a href="#" class="contact__link"><img src="/img/contact/fb.svg" alt="icon" /></a>
+              <a href="#" class="contact__link"><img src="/img/contact/tw.svg" alt="icon" /></a>
+              <a href="#" class="contact__link"><img src="/img/contact/ig.svg" alt="icon" /></a>
+              <a href="#" class="contact__link"><img src="/img/contact/youtube.svg" alt="icon" /></a>
+              <a href="#" class="contact__link"><img src="/img/contact/in.svg" alt="icon" /></a>
             </div>
           </div>
           <div class="contact__info">
             <h2 class="contact__title">Let us get in touch</h2>
             <div class="contact__text">
               <p>
-                Use the project’s GitHub repository for public feedback and support requests. Do not include passwords, access keys, or personal information.
+                Have feedback or need support? We’d love to hear from you! Reach out to our team at urlywarning@gmail.com, and we’ll respond as soon as possible.
               </p>
             </div>
           </div>
         </div>
+      </section>
+      <section class="page__map map">
+        <iframe
+          src="https://www.google.com/maps?q=Complex%2C%20SM%20Baliwag%2C%20Do%C3%B1a%20Remedios%20Trinidad%20Hwy%2C%20Baliwag%2C%20Bulacan&output=embed"
+          width="600" height="450" style="border: 0" allowfullscreen="" loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"></iframe>
       </section>
     </main>
     <footer class="footer">

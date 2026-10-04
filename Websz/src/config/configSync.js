@@ -1,18 +1,13 @@
 /**
- * Configuration Sync with Database
- * Syncs React config changes with backend database for real-time updates
+ * Configuration Sync with Runtime API
+ * Syncs React config changes with backend runtime config for real-time updates.
  */
 
 import { configManagerInstance } from './useConfig';
 
-const IS_STATIC_DEPLOYMENT = import.meta.env.VITE_STATIC_DEPLOYMENT === 'true';
+const API_BASE = 'http://localhost:5050';
 
-const API_BASE = import.meta.env.VITE_SCANNER_API_BASE ||
-  ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? `${window.location.protocol}//${window.location.hostname}:5050`
-    : window.location.origin);
-
-// Mapping between frontend config paths and backend database keys
+// Mapping between frontend config paths and backend runtime config keys.
 const CONFIG_MAPPING = {
   // Scanning settings
   'scanning.enableDNSLookup': { key: 'dns_enabled', type: 'boolean' },
@@ -29,18 +24,18 @@ const CONFIG_MAPPING = {
 };
 
 /**
- * Sync a single config value to database
+ * Sync a single config value to runtime API.
  */
-async function syncConfigToDatabase(path, value) {
+async function syncConfigToRuntime(path, value) {
   const mapping = CONFIG_MAPPING[path];
   
   if (!mapping) {
-    // Not a database-synced config, skip
+    // Not runtime-synced config, skip.
     return;
   }
   
   try {
-    console.log(`🔄 Syncing config to database: ${path} = ${value}`);
+    console.log(`🔄 Syncing config to runtime API: ${path} = ${value}`);
     
     const response = await fetch(`${API_BASE}/api/config`, {
       method: 'POST',
@@ -55,59 +50,65 @@ async function syncConfigToDatabase(path, value) {
     
     if (response.ok) {
       const result = await response.json();
-      console.log(`✅ Config synced to database: ${mapping.key}`);
+      console.log(`✅ Config synced: ${mapping.key}`);
       return result;
     } else {
       console.warn(`⚠️ Failed to sync config: ${response.status}`);
     }
   } catch (error) {
-    console.warn(`⚠️ Database sync failed:`, error.message);
-    // Don't block UI if database is unavailable
+    console.warn(`⚠️ Runtime config sync failed:`, error.message);
+    // Do not block UI if backend is temporarily unavailable.
   }
 }
 
 /**
- * Load config from database on startup
+ * Load config from runtime API on startup.
  */
-async function loadConfigFromDatabase() {
+async function loadConfigFromRuntime() {
   try {
-    console.log('📥 Loading config from database...');
+    console.log('📥 Loading runtime config...');
     
     const response = await fetch(`${API_BASE}/api/config`);
     if (!response.ok) {
-      console.warn('⚠️ Could not load database config');
+      console.warn('⚠️ Could not load runtime config');
       return;
     }
     
     const result = await response.json();
-    const dbConfig = result.config || {};
+    const runtimeConfig = result.config || {};
     
-    // Reverse mapping: database keys to frontend paths
+    // Reverse mapping: backend keys to frontend paths.
     const REVERSE_MAPPING = {};
     Object.entries(CONFIG_MAPPING).forEach(([path, { key }]) => {
       REVERSE_MAPPING[key] = path;
     });
     
-    // Update frontend config with database values
+    // Update frontend config with backend runtime values.
     let updatedCount = 0;
-    Object.entries(dbConfig).forEach(([key, dbValue]) => {
+    Object.entries(runtimeConfig).forEach(([key, rawValue]) => {
       const frontendPath = REVERSE_MAPPING[key];
       if (frontendPath) {
         const currentValue = configManagerInstance.get(frontendPath);
-        if (currentValue !== dbValue.value) {
-          configManagerInstance.set(frontendPath, dbValue.value);
+        // Support both shapes:
+        // 1) { config: { key: primitive } }
+        // 2) { config: { key: { value: primitive } } }
+        const nextValue = (rawValue && typeof rawValue === 'object' && 'value' in rawValue)
+          ? rawValue.value
+          : rawValue;
+        if (currentValue !== nextValue) {
+          configManagerInstance.set(frontendPath, nextValue);
           updatedCount++;
         }
       }
     });
     
     if (updatedCount > 0) {
-      console.log(`✅ Loaded ${updatedCount} config values from database`);
+      console.log(`✅ Loaded ${updatedCount} runtime config values`);
     } else {
-      console.log('✅ Database config in sync');
+      console.log('✅ Runtime config in sync');
     }
   } catch (error) {
-    console.warn('⚠️ Failed to load database config:', error.message);
+    console.warn('⚠️ Failed to load runtime config:', error.message);
   }
 }
 
@@ -115,32 +116,26 @@ async function loadConfigFromDatabase() {
  * Initialize config sync system
  */
 export function initConfigSync() {
-  if (IS_STATIC_DEPLOYMENT) {
-    console.log('ℹ️ Static deployment: settings are stored in this browser only');
-    return;
-  }
-
-  console.log('🔄 Initializing config sync with database...');
+  console.log('🔄 Initializing config sync with runtime API...');
   
-  // Load config from database on startup
-  loadConfigFromDatabase();
+  // Load config from runtime API on startup.
+  loadConfigFromRuntime();
   
-  // Subscribe to config changes and sync to database
+  // Subscribe to config changes and sync to backend runtime API
   configManagerInstance.subscribe((newConfig) => {
-    // We'll sync individual changes as they happen
-    // This is handled by the updateConfig wrapper below
+    // Individual sync is handled by the set wrapper below.
   });
   
   // Wrap the set method to auto-sync
   const originalSet = configManagerInstance.set.bind(configManagerInstance);
   configManagerInstance.set = function(path, value) {
     const result = originalSet(path, value);
-    // Sync to database (async, don't wait)
-    syncConfigToDatabase(path, value);
+    // Sync to backend (async, do not block UI).
+    syncConfigToRuntime(path, value);
     return result;
   };
   
   console.log('✅ Config sync initialized');
 }
 
-export { syncConfigToDatabase, loadConfigFromDatabase };
+export { syncConfigToRuntime, loadConfigFromRuntime };

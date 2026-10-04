@@ -1,0 +1,115 @@
+.urly-profile {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 1400;
+}
+
+.urly-profile__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+  border: 1px solid rgba(151, 182, 255, 0.45);
+  border-radius: 14px;
+  background: linear-gradient(140deg, rgba(10, 22, 48, 0.92), rgba(4, 33, 56, 0.88));
+  color: #e7f1ff;
+  padding: 10px 12px;
+  box-shadow: 0 10px 26px rgba(4, 12, 28, 0.45);
+  cursor: pointer;
+}
+
+.urly-profile__trigger:hover {
+  border-color: rgba(151, 182, 255, 0.65);
+}
+
+.urly-profile__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #081427;
+  background: linear-gradient(160deg, #9bd0ff 0%, #5f8dff 100%);
+}
+
+.urly-profile__name {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.94rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.urly-profile__chevron {
+  font-size: 0.68rem;
+  color: rgba(220, 234, 255, 0.88);
+}
+
+.urly-profile__menu {
+  margin-top: 8px;
+  width: 250px;
+  border-radius: 16px;
+  border: 1px solid rgba(140, 173, 255, 0.35);
+  background: linear-gradient(160deg, rgba(15, 20, 29, 0.96), rgba(19, 27, 35, 0.96));
+  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.urly-profile__menu-header {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(170, 192, 235, 0.16);
+}
+
+.urly-profile__menu-name {
+  color: #f0f6ff;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.urly-profile__menu-email {
+  margin-top: 2px;
+  color: rgba(225, 234, 248, 0.7);
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.urly-profile__menu-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #e6eefc;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 0.94rem;
+  cursor: pointer;
+}
+
+.urly-profile__menu-item:hover {
+  background: rgba(140, 173, 255, 0.12);
+}
+
+.urly-profile__menu-item--logout {
+  color: #ffcfcd;
+}
+
+@media (max-width: 640px) {
+  .urly-profile {
+    top: 10px;
+    right: 10px;
+  }
+
+  .urly-profile__trigger {
+    min-width: 158px;
+    padding: 9px 10px;
+  }
+
+  .urly-profile__menu {
+    width: min(88vw, 250px);
+  }
+}

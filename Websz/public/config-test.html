@@ -105,8 +105,8 @@
     </div>
 
     <div class="test-section">
-        <h2>Test 5: Verify Database Sync</h2>
-        <button onclick="test5()">Check Database Config</button>
+        <h2>Test 5: Verify Runtime Sync</h2>
+        <button onclick="test5()">Check Runtime Config</button>
         <div id="test5-result"></div>
     </div>
 
@@ -186,7 +186,7 @@
                         Old value: ${oldValue}<br>
                         New value: ${newValue}<br>
                         Verified: ${verifyValue}<br>
-                        <small>⚠️ This change should now sync to database and affect next scan</small>`);
+                        <small>⚠️ This change should now sync to the runtime API and affect next scan</small>`);
                 } else {
                     log('test3', `❌ ERROR: Value mismatch (expected ${newValue}, got ${verifyValue})`, true);
                 }
@@ -243,7 +243,7 @@
 
         async function test5() {
             try {
-                log('test5', '⏳ Checking database config...');
+                log('test5', '⏳ Checking runtime config...');
 
                 const response = await fetch('http://localhost:5050/api/config');
                 
@@ -253,19 +253,24 @@
                 }
 
                 const result = await response.json();
-                const dbConfig = result.config || {};
+                const runtimeConfig = result.config || {};
                 
-                const configKeys = Object.keys(dbConfig);
+                const configKeys = Object.keys(runtimeConfig);
+                const previewRows = configKeys.slice(0, 10).map((key) => {
+                    const value = runtimeConfig[key];
+                    if (value && typeof value === 'object' && 'value' in value) {
+                        return `${key}: <strong>${value.value}</strong> (${value.type || typeof value.value})`;
+                    }
+                    return `${key}: <strong>${String(value)}</strong> (${typeof value})`;
+                });
                 
-                log('test5', `✅ SUCCESS: Database config loaded!<br>
+                log('test5', `✅ SUCCESS: Runtime config loaded!<br>
                     <strong>Config entries:</strong> ${configKeys.length}<br>
                     <br>
                     <strong>Key settings:</strong><br>
-                    ${configKeys.slice(0, 10).map(key => 
-                        `${key}: <strong>${dbConfig[key].value}</strong> (${dbConfig[key].type})`
-                    ).join('<br>')}<br>
+                    ${previewRows.join('<br>')}<br>
                     <br>
-                    <small>✅ Changes made in the Scanner Configuration panel are synced to database!</small>`);
+                    <small>✅ Changes made in the Scanner Configuration panel are synced to the runtime API!</small>`);
             } catch (error) {
                 log('test5', `❌ ERROR: ${error.message}<br>
                     <small>Make sure the backend server is running on port 5050</small>`, true);

@@ -93,10 +93,11 @@ class ConfigManager {
     return {
       api: {
         endpoint: 'http://localhost:5050/api/scan',
-        timeout: 12000,
+        timeout: 30000,
         retryAttempts: 2,
         googleSafeBrowsing: {
-          enabled: true
+          enabled: true,
+          apiKey: ''
         }
       },
       scanning: {

@@ -1,8 +1,3 @@
-(() => {
-// Keep this legacy bundle isolated because PageLoader may load it again after
-// route changes or hot reloads. Without a private scope, top-level const values
-// throw redeclaration errors and disable the page on the second load.
-
 // ============== Attach UI Event Listeners ==============
 function attachUIEventListeners() {
   // Allow reattachment of UI listeners for navigation
@@ -16,10 +11,12 @@ function attachUIEventListeners() {
     newMenuBtn.addEventListener("click", function (event) {
       event.preventDefault();
       document.body.classList.toggle("menu-open");
-      newMenuBtn.setAttribute('aria-expanded', String(document.body.classList.contains('menu-open')));
     });
   }
 
+  // Re-setup theme toggle for this page
+  setupThemeToggle();
+  
   // Remove background from shield logos
   removeShieldLogoBackground();
 
@@ -27,14 +24,8 @@ function attachUIEventListeners() {
   const STORAGE_KEY = "themePreference";
   
   function applyTheme(mode) {
-    const requestedMode = ['light', 'dark', 'auto'].includes(mode) ? mode : 'auto';
-    const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const effectiveMode = requestedMode === 'auto' ? (systemDark ? 'dark' : 'light') : requestedMode;
-    const isDark = effectiveMode === "dark";
+    const isDark = mode === "dark";
     document.body.classList.toggle("theme-dark", isDark);
-    document.body.classList.toggle("theme-light", !isDark);
-    document.body.classList.toggle("theme-auto", requestedMode === 'auto');
-    document.body.style.colorScheme = effectiveMode;
     
     // Update theme toggle button text
     const toggleEl = document.getElementById("themeToggle");
@@ -66,62 +57,65 @@ function attachUIEventListeners() {
   }
   
   function getInitialTheme() {
-    const configured = window.configManager?.get('display.colorScheme');
-    // The unified config is authoritative, including the explicit "auto"
-    // choice. Previously an old localStorage toggle value overrode "auto" on
-    // every reload, which made the theme appear to change unpredictably.
-    if (configured === 'dark' || configured === 'light' || configured === 'auto') return configured;
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "dark" || saved === "light") {
-        // Migrate the original standalone theme preference into the unified
-        // configuration so unrelated settings cannot reset it.
-        window.configManager?.set('display.colorScheme', saved);
-        return saved;
-      }
+      if (saved === "dark" || saved === "light") return saved;
     } catch (e) {}
-    return 'auto';
+    const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return prefersDark ? "dark" : "light";
   }
   
   // Initialize theme
   let currentTheme = getInitialTheme();
   applyTheme(currentTheme);
-  window.applyThemePreference = function(mode) {
-    currentTheme = mode;
-    applyTheme(mode);
-  };
   
-  // Direct theme toggle button handler
+  // Direct theme toggle button handler with guard to prevent multiple setups
   function setupThemeToggle() {
+    // Guard: Prevent multiple setups using a flag
+    if (window.__themeToggleSetup) {
+      return; // Already set up, skip
+    }
+    window.__themeToggleSetup = true;
+    
     const themeToggleBtn = document.getElementById("themeToggle");
     if (themeToggleBtn) {
-      // Remove any existing listeners by cloning the button
-      const newBtn = themeToggleBtn.cloneNode(true);
-      themeToggleBtn.parentNode.replaceChild(newBtn, themeToggleBtn);
+      console.log('✅ Theme toggle button found and setting up listener');
       
-      // Add fresh event listener
-      newBtn.addEventListener("click", function(e) {
+      // Remove any existing listeners (clean slate)
+      const oldBtn = themeToggleBtn.cloneNode(true);
+      themeToggleBtn.parentNode.replaceChild(oldBtn, themeToggleBtn);
+      
+      // Add fresh click listener
+      oldBtn.addEventListener("click", function(e) {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
+        
+        console.log('🌓 Theme toggle button clicked');
         
         // Toggle theme
-        currentTheme = document.body.classList.contains("theme-dark") ? "light" : "dark";
-        window.applyThemePreference(currentTheme);
+        const newTheme = document.body.classList.contains("theme-dark") ? "light" : "dark";
+        currentTheme = newTheme;
+        applyTheme(currentTheme);
         
         // Save to localStorage
         try { 
-          localStorage.setItem(STORAGE_KEY, currentTheme); 
+          localStorage.setItem(STORAGE_KEY, currentTheme);
+          localStorage.setItem(STORAGE_KEY + '_timestamp', Date.now());
+          console.log(`✅ Theme changed to: ${currentTheme} | Button now shows: ${oldBtn.textContent}`);
         } catch (e2) {
           console.warn('Could not save theme preference:', e2);
         }
-        if (window.configManager?.get('display.colorScheme') !== currentTheme) {
-          window.configManager?.set('display.colorScheme', currentTheme);
-        }
-      });
+      }, true); // Use capture phase
+    } else {
+      console.warn('⚠️ Theme toggle button not found on this page');
     }
   }
   
-  // Setup theme toggle on load
+  // Expose setupThemeToggle globally so PageLoader can call it
+  window.setupThemeToggle = setupThemeToggle;
+  
+  // Setup theme toggle on initial load
   setupThemeToggle();
 
   // Home Button Function
@@ -293,7 +287,7 @@ function attachUIEventListeners() {
     
     socialLinks.forEach(link => {
       link.addEventListener('click', function(e) {
-        // For demo purposes, show an alert since URLs aren't provided
+        // Show an alert when placeholder URLs are not configured
         if (link.getAttribute('href') === '#') {
           e.preventDefault();
           
@@ -753,6 +747,27 @@ function initScanner() {
 
   if (!input || !scanBtn || !resultsEl) return;
 
+  // ============== PERSIST INPUT VALUE ACROSS NAVIGATION ==============
+  // Restore saved input value from sessionStorage
+  const savedInput = sessionStorage.getItem('urly_scanner_input');
+  if (savedInput && input) {
+    input.value = savedInput;
+    console.log('✅ Restored scanner input from session');
+  }
+
+  // Save input value whenever it changes
+  if (input) {
+    input.addEventListener('input', () => {
+      sessionStorage.setItem('urly_scanner_input', input.value);
+    });
+    
+    // Also save on blur (when user clicks away)
+    input.addEventListener('blur', () => {
+      sessionStorage.setItem('urly_scanner_input', input.value);
+    });
+  }
+  // ===================================================================
+
   // Remove existing event listeners to prevent duplicates
   const newScanBtn = scanBtn.cloneNode(true);
   scanBtn.parentNode.replaceChild(newScanBtn, scanBtn);
@@ -857,14 +872,11 @@ function initScanner() {
 
   // Lightweight integration with local no-API scanner (if running on port 5050)
   async function tryLocalScan(url) {
-    if (window.URLY_STATIC_DEPLOYMENT === true) return null;
-
     try {
       // Get configuration settings
       const config = window.configManager ? window.configManager.getConfig() : {};
       const apiEndpoint = config.api?.endpoint || 'http://localhost:5050/api/scan';
-      // Keep the interface responsive even when network checks are unavailable.
-      const timeout = Math.min(Math.max(config.api?.timeout || 12000, 5000), 12000);
+      const timeout = config.api?.timeout || 30000;
       const scanningOptions = config.scanning || {};
       const heuristicsOptions = config.heuristics || {};
       const gsbOptions = config.api?.googleSafeBrowsing || {};
@@ -895,17 +907,14 @@ function initScanner() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
       
-      let resp;
-      try {
-        resp = await fetch(apiEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, options }),
-          signal: controller.signal
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
+      const resp = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, options }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
       
       if (!resp.ok) return null;
       return await resp.json();
@@ -1346,11 +1355,13 @@ function initScanner() {
       reasons.push("HTTPS detected: baseline safe.");
     }
 
-    // If deep content checks couldn't run (no externalLinks number), lower confidence
+    // If deep content checks couldn't run (no externalLinks number), DON'T penalize
+    // Many legitimate sites (Instagram, Facebook, etc.) block scrapers for security
+    // This is not a sign of malicious behavior - it's actually good security practice
     if (typeof externalLinks !== "number") {
-      // Penalize lack of content fetch — this reduces overly-confident 'Very Safe' labels
-      risk += 20;
-      reasons.push("Deep content checks unavailable (page not fetched).");
+      // Just note that content analysis wasn't available, but don't add risk
+      reasons.push("Deep content analysis unavailable (site may block automated access).");
+      // NO PENALTY - Removed the "risk += 20" that was penalizing legitimate sites
     }
 
     if (Array.isArray(heuristicFlags) && heuristicFlags.length) {
@@ -1623,6 +1634,19 @@ function initScanner() {
     // Build a structured body with one row per detail for clearer spacing
     const body = document.createElement('div');
     body.className = 'scanner-result__body';
+    
+    // Add title at the very top
+    const bodyTitle = document.createElement('h4');
+    bodyTitle.className = 'scanner-result__body-title scanner-result__body-title--top';
+    bodyTitle.innerHTML = '🔍 SCAN RESULT';
+    body.appendChild(bodyTitle);
+    
+    // Add safety rating below the title
+    body.appendChild(safetyRatingEl);
+    
+    // Container for the details
+    const detailsContainer = document.createElement('div');
+    detailsContainer.className = 'scanner-result__details-container';
 
     function addDetail(label, value, extraClass) {
       const row = document.createElement('div');
@@ -1638,29 +1662,7 @@ function initScanner() {
 
       row.appendChild(lbl);
       row.appendChild(val);
-      body.appendChild(row);
-      return row;
-    }
-
-    function addDetailButton(label, value, onClick, extraClass) {
-      const row = document.createElement('div');
-      row.className = 'scanner-result__row scanner-result__row--interactive ' + (extraClass || '');
-
-      const lbl = document.createElement('span');
-      lbl.className = 'scanner-result__label';
-      lbl.textContent = label + ':';
-
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'scanner-result__detail-button';
-      button.textContent = value;
-      button.setAttribute('aria-label', `${label}: ${value}. Open details`);
-      button.addEventListener('click', onClick);
-
-      row.appendChild(lbl);
-      row.appendChild(button);
-      body.appendChild(row);
-      return row;
+      detailsContainer.appendChild(row);
     }
 
     addDetail('Protocol', item.isHttps ? 'HTTPS' : 'HTTP');
@@ -1669,9 +1671,8 @@ function initScanner() {
     if (item.localScan && item.localScan.tls && item.isHttps) {
       const tls = item.localScan.tls;
       if (tls.ok !== undefined && tls.ok !== null) {
-        const unavailable = Boolean(tls.error);
-        const sslStatus = unavailable ? '⚠ Unavailable' : (tls.ok ? '✓ Valid' : '✗ Invalid');
-        const sslClass = unavailable ? 'row--ssl-unknown' : (tls.ok ? 'row--ssl-valid' : 'row--ssl-invalid');
+        const sslStatus = tls.ok ? '✓ Valid' : '✗ Invalid';
+        const sslClass = tls.ok ? 'row--ssl-valid' : 'row--ssl-invalid';
         addDetail('SSL Certificate', sslStatus, sslClass);
         
         // Show days to expiration if available
@@ -1705,26 +1706,62 @@ function initScanner() {
     }
     
     addDetail('Category', item.category || 'Unknown');
-
-    const externalLinksData = item.localScan?.externalLinks || {
-      count: typeof item.externalLinks === 'number' ? item.externalLinks : null,
-      links: []
-    };
-    const externalLinksLabel = typeof externalLinksData.count === 'number'
-      ? `${externalLinksData.count} — view details`
-      : 'Unavailable — learn why';
-    addDetailButton(
-      'External links',
-      externalLinksLabel,
-      () => showExternalLinksModal(externalLinksData)
-    );
-
-    addDetailButton(
-      'Risk score',
-      `${item.risk} (${item.status.toUpperCase()}) — view full breakdown`,
-      () => showRiskScoreModal(item),
-      'row--risk'
-    );
+    
+    // External links - make clickable if data exists
+    if (item.localScan && item.localScan.externalLinks) {
+      const externalLinksRow = document.createElement('div');
+      externalLinksRow.className = 'scanner-result__row';
+      
+      const label = document.createElement('div');
+      label.className = 'scanner-result__label';
+      label.textContent = 'External links';
+      
+      const value = document.createElement('div');
+      value.className = 'scanner-result__value';
+      value.style.cursor = 'pointer';
+      value.style.color = '#2196f3';
+      value.style.textDecoration = 'underline';
+      value.textContent = `${item.localScan.externalLinks.count} 👁️`;
+      value.title = 'Click to view external links';
+      
+      value.addEventListener('click', () => {
+        showExternalLinksModal(item.localScan.externalLinks);
+      });
+      
+      externalLinksRow.appendChild(label);
+      externalLinksRow.appendChild(value);
+      detailsContainer.appendChild(externalLinksRow);
+    } else {
+      addDetail('External links', typeof item.externalLinks === 'number' ? item.externalLinks : 'Unknown');
+    }
+    
+    // Risk score - make clickable if scan data exists
+    if (item.localScan && item.safetyRating !== undefined) {
+      const riskScoreRow = document.createElement('div');
+      riskScoreRow.className = 'scanner-result__row row--risk';
+      
+      const label = document.createElement('div');
+      label.className = 'scanner-result__label';
+      label.textContent = 'Risk score';
+      
+      const value = document.createElement('div');
+      value.className = 'scanner-result__value';
+      value.style.cursor = 'pointer';
+      value.style.textDecoration = 'underline';
+      value.textContent = `${item.risk} (${item.status.toUpperCase()}) 👁️`;
+      value.title = 'Click to view detailed breakdown';
+      
+      value.addEventListener('click', () => {
+        showRiskScoreModal(item);
+      });
+      
+      riskScoreRow.appendChild(label);
+      riskScoreRow.appendChild(value);
+      detailsContainer.appendChild(riskScoreRow);
+    } else {
+      addDetail('Risk score', `${item.risk} (${item.status.toUpperCase()})`, 'row--risk');
+    }
+    
     addDetail('Scanned at', item.scannedAt || 'Unknown');
   const grouped = groupReasons(item.reasons || []);
   const summaryParts = [];
@@ -1777,85 +1814,40 @@ function initScanner() {
       if (repParts.length) addDetail('Reputation', repParts.join(', '), 'row--server');
       // HTTP and DNS details intentionally hidden
     }
+    
+    // Append details container to body
+    body.appendChild(detailsContainer);
 
     // Score Breakdown Section
     const scoreBreakdown = document.createElement('div');
     scoreBreakdown.className = 'scanner-result__score-breakdown';
-    scoreBreakdown.style.display = 'none'; // Will be controlled by config
+    
+    // Add title
+    const scoreBreakdownTitle = document.createElement('h4');
+    scoreBreakdownTitle.className = 'breakdown-title';
+    scoreBreakdownTitle.innerHTML = '📊 SCORE BREAKDOWN';
+    scoreBreakdown.appendChild(scoreBreakdownTitle);
     
     if (item.localScan) {
-      const breakdownTitle = document.createElement('h4');
-      breakdownTitle.className = 'breakdown-title';
-      breakdownTitle.innerHTML = '📊 Score Breakdown';
-      scoreBreakdown.appendChild(breakdownTitle);
-      
       const breakdownGrid = document.createElement('div');
       breakdownGrid.className = 'breakdown-grid';
-
-      // Prefer the API's canonical breakdown. Every category then uses the
-      // same risk-point scale (0 is good, 100 is dangerous), avoiding the old
-      // mix of risk points for heuristics and safety points for other checks.
-      if (Array.isArray(item.localScan.scoreBreakdown) && item.localScan.scoreBreakdown.length > 0) {
-        const icons = {
-          'Heuristic Analysis': '🧠',
-          'Google Safe Browsing': '🛡️',
-          'Blocklist': '📋',
-          'DNS Lookup': '🌐',
-          'SSL/TLS': '🔒'
-        };
-
-        item.localScan.scoreBreakdown.forEach((entry) => {
-          const breakdownItem = document.createElement('div');
-          breakdownItem.className = `breakdown-item breakdown-item--clickable breakdown-item--${entry.status || 'safe'}`;
-          breakdownItem.tabIndex = 0;
-          breakdownItem.setAttribute('role', 'button');
-          breakdownItem.setAttribute('aria-label', `Open ${entry.category || 'security check'} details`);
-
-          const label = document.createElement('div');
-          label.className = 'breakdown-label';
-          label.textContent = `${icons[entry.category] || '•'} ${entry.category || 'Security check'}`;
-
-          const score = document.createElement('div');
-          score.className = 'breakdown-score';
-          score.textContent = `${Number(entry.points) || 0} risk points`;
-
-          const detail = document.createElement('div');
-          detail.className = 'breakdown-detail';
-          const flags = Array.isArray(entry.flags) ? entry.flags.map((flag) => flag.name).filter(Boolean) : [];
-          detail.textContent = flags.length ? flags.join(', ') : (entry.description || 'No issues found');
-
-          breakdownItem.append(label, score, detail);
-          const openEntry = () => showBreakdownEntryModal(entry, item);
-          breakdownItem.addEventListener('click', openEntry);
-          breakdownItem.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              openEntry();
-            }
-          });
-          breakdownGrid.appendChild(breakdownItem);
-        });
-      } else {
+      
       // Heuristics Score
       if (item.localScan.heuristics && !item.localScan.heuristics.skipped) {
         const heuristicItem = document.createElement('div');
         heuristicItem.className = 'breakdown-item breakdown-item--clickable';
-        heuristicItem.tabIndex = 0;
-        heuristicItem.setAttribute('role', 'button');
-        heuristicItem.setAttribute('aria-label', 'Open heuristic analysis details');
+        heuristicItem.style.cursor = 'pointer';
         heuristicItem.innerHTML = `
           <div class="breakdown-label">🧠 Heuristic Analysis</div>
           <div class="breakdown-score">${item.localScan.heuristics.score || 0} points</div>
-          <div class="breakdown-detail">Flags: ${(item.localScan.heuristics.flags || []).length}</div>
+          <div class="breakdown-detail">Flags: ${(item.localScan.heuristics.flags || []).length} 👁️</div>
         `;
-        const openHeuristics = () => showHeuristicDetailsModal(item.localScan.heuristics);
-        heuristicItem.addEventListener('click', openHeuristics);
-        heuristicItem.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openHeuristics();
-          }
+        
+        // Make it clickable to show details
+        heuristicItem.addEventListener('click', () => {
+          showHeuristicDetailsModal(item.localScan.heuristics);
         });
+        
         breakdownGrid.appendChild(heuristicItem);
       }
       
@@ -1902,32 +1894,99 @@ function initScanner() {
       if (item.localScan.tls && !item.localScan.tls.skipped) {
         const tlsItem = document.createElement('div');
         tlsItem.className = 'breakdown-item';
-        const tlsUnavailable = Boolean(item.localScan.tls.error);
+        // Fix: use 'ok' property instead of 'valid' (backend returns 'ok')
         const tlsScore = item.localScan.tls.ok ? 100 : 0;
+        const tlsStatus = item.localScan.tls.ok ? 'Valid' : 'Invalid';
+        const tlsDetail = item.localScan.tls.error ? ` (${item.localScan.tls.error})` : '';
         tlsItem.innerHTML = `
           <div class="breakdown-label">🔒 SSL/TLS</div>
           <div class="breakdown-score">${tlsScore} points</div>
-          <div class="breakdown-detail">${tlsUnavailable ? 'Unavailable' : (item.localScan.tls.ok ? 'Valid' : 'Invalid')}</div>
+          <div class="breakdown-detail">${tlsStatus}${tlsDetail}</div>
         `;
         breakdownGrid.appendChild(tlsItem);
       }
+
+      // Guarantee content even if localScan contains only partial/minimal fields.
+      if (breakdownGrid.childElementCount === 0) {
+        const fallbackItem = document.createElement('div');
+        fallbackItem.className = 'breakdown-item';
+        fallbackItem.innerHTML = `
+          <div class="breakdown-label">ℹ️ Analysis Summary</div>
+          <div class="breakdown-score">${item.safetyRating || 0}%</div>
+          <div class="breakdown-detail">Detailed breakdown is unavailable for this scan response.</div>
+        `;
+        breakdownGrid.appendChild(fallbackItem);
       }
       
+      scoreBreakdown.appendChild(breakdownGrid);
+    }
+
+    // Always populate score breakdown for fallback-only scans.
+    if (!item.localScan) {
+      const breakdownGrid = document.createElement('div');
+      breakdownGrid.className = 'breakdown-grid';
+
+      const protocolItem = document.createElement('div');
+      protocolItem.className = 'breakdown-item';
+      const protocolScore = item.isHttps ? 100 : 0;
+      protocolItem.innerHTML = `
+        <div class="breakdown-label">🔐 Protocol Security</div>
+        <div class="breakdown-score">${protocolScore} points</div>
+        <div class="breakdown-detail">${item.isHttps ? 'HTTPS detected' : 'HTTP (unencrypted)'}</div>
+      `;
+      breakdownGrid.appendChild(protocolItem);
+
+      const heurItem = document.createElement('div');
+      heurItem.className = 'breakdown-item';
+      const heurFlags = Array.isArray(item.heuristicFlags) ? item.heuristicFlags : [];
+      const heurScore = Math.max(0, 100 - (item.risk || 0));
+      heurItem.innerHTML = `
+        <div class="breakdown-label">🧠 Heuristic Signals</div>
+        <div class="breakdown-score">${heurScore} points</div>
+        <div class="breakdown-detail">Flags: ${heurFlags.length}</div>
+      `;
+      breakdownGrid.appendChild(heurItem);
+
+      const contentItem = document.createElement('div');
+      contentItem.className = 'breakdown-item';
+      const missCount = Array.isArray(item.misspellings) ? item.misspellings.length : 0;
+      const extCount = Number.isFinite(item.externalLinks) ? item.externalLinks : 0;
+      const contentScore = Math.max(0, 100 - (missCount * 15) - Math.min(extCount, 10) * 3);
+      contentItem.innerHTML = `
+        <div class="breakdown-label">📄 Content Signals</div>
+        <div class="breakdown-score">${contentScore} points</div>
+        <div class="breakdown-detail">${missCount} misspellings, ${extCount} external links</div>
+      `;
+      breakdownGrid.appendChild(contentItem);
+
+      const overallItem = document.createElement('div');
+      overallItem.className = 'breakdown-item';
+      overallItem.innerHTML = `
+        <div class="breakdown-label">📌 Overall Classification</div>
+        <div class="breakdown-score">${item.safetyRating || 0}%</div>
+        <div class="breakdown-detail">${item.safetyLevel || (item.isSafe ? 'Safe' : 'Caution')}</div>
+      `;
+      breakdownGrid.appendChild(overallItem);
+
       scoreBreakdown.appendChild(breakdownGrid);
     }
     
     // Recommendations Section
     const recommendationsSection = document.createElement('div');
     recommendationsSection.className = 'scanner-result__recommendations';
-    recommendationsSection.style.display = 'none'; // Will be controlled by config
     
-    if (item.localScan && item.localScan.recommendations) {
+    // Always add title
+    const recTitle = document.createElement('h4');
+    recTitle.className = 'recommendations-title';
+    recTitle.innerHTML = '💡 RECOMMENDATIONS';
+    recommendationsSection.appendChild(recTitle);
+    
+    if (item.localScan && item.localScan.recommendations && (
+      (Array.isArray(item.localScan.recommendations.messages) && item.localScan.recommendations.messages.length > 0) ||
+      (Array.isArray(item.localScan.recommendations.actions) && item.localScan.recommendations.actions.length > 0) ||
+      (Array.isArray(item.localScan.recommendations.context) && item.localScan.recommendations.context.length > 0)
+    )) {
       const rec = item.localScan.recommendations;
-      
-      const recTitle = document.createElement('h4');
-      recTitle.className = 'recommendations-title';
-      recTitle.innerHTML = '💡 RECOMMENDATIONS';
-      recommendationsSection.appendChild(recTitle);
       
       // Messages
       if (rec.messages && rec.messages.length > 0) {
@@ -1977,6 +2036,50 @@ function initScanner() {
         });
         recommendationsSection.appendChild(contextDiv);
       }
+    } else {
+      // Build fallback recommendations so this column is never empty.
+      const fallbackMessages = [];
+      const fallbackActions = [];
+      const flags = Array.isArray(item.heuristicFlags) ? item.heuristicFlags : [];
+
+      if (item.isSafe) {
+        fallbackMessages.push('This URL appears safe based on local analysis.');
+        fallbackMessages.push('No major warning patterns were detected.');
+        fallbackActions.push('Continue normally, but verify sensitive pages before entering credentials.');
+      } else {
+        fallbackMessages.push('This URL has warning indicators from local analysis.');
+        if (flags.length > 0) fallbackMessages.push(`Detected flags: ${flags.join(', ')}`);
+        fallbackActions.push('Avoid entering passwords or payment details until verified.');
+        fallbackActions.push('Double-check the domain spelling and source of the link.');
+      }
+
+      if (!item.localScan) {
+        fallbackMessages.push('Detailed server-side checks were unavailable for this scan.');
+      }
+
+      const messagesDiv = document.createElement('div');
+      messagesDiv.className = 'recommendations-messages';
+      fallbackMessages.forEach(msg => {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'recommendation-message';
+        msgEl.textContent = msg;
+        messagesDiv.appendChild(msgEl);
+      });
+      recommendationsSection.appendChild(messagesDiv);
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'recommendations-actions';
+      const actionsTitle = document.createElement('div');
+      actionsTitle.className = 'actions-title';
+      actionsTitle.textContent = 'Suggested Actions:';
+      actionsDiv.appendChild(actionsTitle);
+      fallbackActions.forEach(action => {
+        const actionEl = document.createElement('div');
+        actionEl.className = 'recommendation-action';
+        actionEl.textContent = `• ${action}`;
+        actionsDiv.appendChild(actionEl);
+      });
+      recommendationsSection.appendChild(actionsDiv);
     }
 
     const badges = document.createElement("div");
@@ -2002,11 +2105,18 @@ function initScanner() {
     // Heuristic flags badges removed for cleaner display
 
   wrapper.appendChild(head);
-  wrapper.appendChild(safetyRatingEl);
-  wrapper.appendChild(body);
+  // safetyRatingEl is now inside body
+  
+    // Create three-column content grid
+    const contentGrid = document.createElement('div');
+    contentGrid.className = 'scanner-result__content-grid';
+    
+    contentGrid.appendChild(scoreBreakdown);
+    contentGrid.appendChild(body);
+    contentGrid.appendChild(recommendationsSection);
+    
     if (badges.childNodes.length) wrapper.appendChild(badges);
-    wrapper.appendChild(scoreBreakdown);
-    wrapper.appendChild(recommendationsSection);
+    wrapper.appendChild(contentGrid);
     
     // Apply display config - check both ways for compatibility
     if (window.configManager) {
@@ -2017,9 +2127,14 @@ function initScanner() {
         const showTimestamps = window.configManager.get('display.showTimestamps');
         const showPerformanceMetrics = window.configManager.get('display.showPerformanceMetrics');
         
-        // Apply visibility for body (detailed analysis)
-        body.style.display = showDetailedAnalysis ? 'block' : 'none';
+        // Apply visibility for body (detailed analysis) - use flex to maintain layout
+        body.style.display = showDetailedAnalysis ? 'flex' : 'none';
         body.dataset.configKey = 'display.showDetailedAnalysis';
+        
+        // Hide/show details container based on config
+        if (detailsContainer) {
+          detailsContainer.style.display = showDetailedAnalysis ? 'grid' : 'none';
+        }
         
         // Apply visibility for score breakdown
         scoreBreakdown.style.display = showScoreBreakdown ? 'block' : 'none';
@@ -2044,13 +2159,13 @@ function initScanner() {
       } catch (e) {
         console.warn('Could not apply display config:', e);
         // Default to showing if config manager not available
-        body.style.display = 'block';
+        body.style.display = 'flex';
         scoreBreakdown.style.display = 'block';
         recommendationsSection.style.display = 'block';
       }
     } else {
       // No config manager - show by default
-      body.style.display = 'block';
+      body.style.display = 'flex';
       scoreBreakdown.style.display = 'block';
       recommendationsSection.style.display = 'block';
     }
@@ -2083,11 +2198,44 @@ function initScanner() {
     }
   }
 
+  function getWebAuthToken() {
+    return localStorage.getItem('urly_auth_token') || sessionStorage.getItem('urly_auth_token');
+  }
+
+  function getApiBaseUrl() {
+    const config = window.configManager ? window.configManager.getConfig() : {};
+    const endpoint = config.api?.endpoint || 'http://localhost:5050/api/scan';
+    return endpoint.replace(/\/api\/scan\/?$/, '');
+  }
+
+  async function saveScanToBackendHistory(entry) {
+    const token = getWebAuthToken();
+    if (!token || !entry || entry.error) return;
+
+    try {
+      await fetch(`${getApiBaseUrl()}/api/history/add`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          url: entry.url,
+          result: entry,
+          cached: false,
+        }),
+      });
+    } catch (e) {
+      console.warn('Failed to save website scan history:', e);
+    }
+  }
+
   function addToHistory(entry) {
     const history = loadHistory();
     history.unshift(entry);
     saveHistory(history);
     renderHistory(history);
+    saveScanToBackendHistory(entry);
   }
 
   // State for show more functionality
@@ -2255,15 +2403,47 @@ function initScanner() {
     }
     
     // Fallback to basic version
-    document.body.classList.remove("scan-safe", "scan-unsafe");
+    document.body.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
+    document.documentElement.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
     if (anyUnsafe) {
       document.body.classList.add("scan-unsafe");
+      document.documentElement.classList.add("scan-unsafe");
       if (summaryEl) summaryEl.textContent = "At least one link appears unsafe. Review details below.";
     } else if (isAllSafe) {
       document.body.classList.add("scan-safe");
+      document.documentElement.classList.add("scan-safe");
       if (summaryEl) summaryEl.textContent = "All scanned links look safe based on basic checks.";
+    } else if (!isAllSafe && !anyUnsafe) {
+      document.body.classList.add("scan-caution");
+      document.documentElement.classList.add("scan-caution");
+      if (summaryEl) summaryEl.textContent = "Some links may require caution. Review details below.";
     } else {
       if (summaryEl) summaryEl.textContent = "Scan complete.";
+    }
+  }
+
+  // ==================== DOMAIN EXISTENCE CHECKING ====================
+  
+  async function checkDomainExists(url) {
+    try {
+      // Try to fetch just the headers with a very short timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+      
+      const response = await fetch(url, {
+        method: 'HEAD', // Just get headers, not the full content
+        mode: 'no-cors', // Avoid CORS issues
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      return { exists: true, error: null };
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        return { exists: false, error: 'timeout' };
+      }
+      // Network errors, DNS failures, etc.
+      return { exists: false, error: error.message || 'domain_not_found' };
     }
   }
 
@@ -2279,22 +2459,16 @@ function initScanner() {
       let reasons = [];
   const { flags: heuristicFlags, notes: heuristicNotes, tld, phishingScore } = analyzeUrlHeuristics(url, rawInput);
 
-      // Ask the local scanner first. This keeps DNS/TLS/network access out of the
-      // browser and guarantees a bounded fallback when the API is unavailable.
-      let localScan = null;
-      try {
-        localScan = await tryLocalScan(url);
-      } catch (e) { /* use browser heuristics only */ }
-
-      const dnsFailed = localScan?.dns && localScan.dns.skipped !== true && localScan.dns.ok === false;
-      if (dnsFailed) {
+      // ==================== DOMAIN EXISTENCE CHECK ====================
+      const domainCheck = await checkDomainExists(url);
+      if (!domainCheck.exists) {
         // Domain doesn't exist - this is highly suspicious
         // Add domain-not-found to existing heuristic flags
         const allFlags = [...heuristicFlags, "domain-not-found"];
         
         // Build comprehensive reasons including heuristic analysis
         const allReasons = [];
-        allReasons.push(`Domain could not be resolved (${localScan.dns.error || 'DNS lookup failed'})`);
+        allReasons.push(`Domain does not exist or is unreachable (${domainCheck.error})`);
         allReasons.push(`Uses ${isHttps ? 'HTTPS' : 'HTTP'}.`);
         
         // Add heuristic reasons if any were found
@@ -2340,6 +2514,12 @@ function initScanner() {
         return nonExistentResult;
       }
 
+      // Attempt local deep scan (no-API server) and merge signals if available
+      let localScan = null;
+      try {
+        localScan = await tryLocalScan(url);
+      } catch (e) { /* ignore */ }
+
       // If local scanner already indicates a strong signal (blocklist, early exit, or GSB unsafe),
       // skip the slow HTML proxy fetch to keep results snappy.
       const strongLocalSignal = !!(localScan && (
@@ -2348,9 +2528,7 @@ function initScanner() {
         (localScan.verdict && /fast result\s*\(early exit\)/i.test(String(localScan.verdict.notes || '')))
       ));
 
-      const config = window.configManager ? window.configManager.getConfig() : {};
-      const allowThirdPartyContentProxy = config.advanced?.allowThirdPartyContentProxy === true;
-      if (!strongLocalSignal && allowThirdPartyContentProxy && config.scanning?.enableContentAnalysis !== false) {
+      if (!strongLocalSignal) {
         try {
           const html = await fetchPageHtmlWithProxy(url, 1500);
           if (html) {
@@ -2471,7 +2649,8 @@ function initScanner() {
 
   async function scanAll() {
     resultsEl.innerHTML = "";
-    document.body.classList.remove("scan-safe", "scan-unsafe");
+    document.body.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
+    document.documentElement.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
     if (summaryEl) summaryEl.textContent = "";
 
     // Show progress bar
@@ -2608,7 +2787,8 @@ function initScanner() {
     input.value = "";
     resultsEl.innerHTML = "";
     summaryEl.textContent = "";
-    document.body.classList.remove("scan-safe", "scan-unsafe");
+    document.body.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
+    document.documentElement.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
   }
 
   function clearHistory() {
@@ -2690,10 +2870,24 @@ window.updateDisplayFromConfig = function() {
       }
     });
     
-    // Theme has one owner. Other configuration changes may refresh display
-    // options, but they must not reset the user's selected light/dark mode.
-    if (colorScheme && typeof window.applyThemePreference === 'function') {
-      window.applyThemePreference(colorScheme);
+    // Apply color scheme - BUT don't override manual theme toggle
+    // Skip if user has manually set theme preference
+    const manualThemePreference = localStorage.getItem('themePreference');
+    if (colorScheme && !manualThemePreference) {
+      const body = document.body;
+      body.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+      
+      if (colorScheme === 'light') {
+        body.classList.add('theme-light');
+        body.style.colorScheme = 'light';
+      } else if (colorScheme === 'dark') {
+        body.classList.add('theme-dark');
+        body.style.colorScheme = 'dark';
+      } else if (colorScheme === 'auto') {
+        body.classList.add('theme-auto');
+        body.style.colorScheme = 'light dark';
+        // Let CSS prefer-color-scheme handle it
+      }
     }
     
     console.log('✅ Display updated from config:', {
@@ -2723,14 +2917,14 @@ if (window.configManager) {
 async function checkUrlWithPhishAPI(url) {
   // Example: Use PhishTank public API (or any similar open API)
   // This is a placeholder; you may need to register for an API key for real use.
-  // For demo, we'll use a fake endpoint and always return safe.
+  // For now, this returns a safe verdict until a real endpoint is configured.
   // Replace with a real API call as needed.
   try {
     // Example: const res = await fetch(`https://checkurl.phishtank.com/checkurl/?url=${encodeURIComponent(url)}&format=json`);
     // const data = await res.json();
-    // if (data.results.in_database && data.results.valid) return { flagged: true, reason: 'PhishTank flagged as phishing' };
+    // if (data.results.in_source && data.results.valid) return { flagged: true, reason: 'PhishTank flagged as phishing' };
     // return { flagged: false };
-    return { flagged: false }; // Always safe for demo
+    return { flagged: false }; // Default safe fallback
   } catch (e) {
     return { flagged: false };
   }
@@ -3088,12 +3282,22 @@ window.initSecurityTheme = initSecurityTheme;
 // ==================== ENHANCED SCAN RESULT EFFECTS (OPTIMIZED) ====================
 
 // Create additional visual effects for scan results (OPTIMIZED - reduced particles)
-function createScanResultEffects(isUnsafe) {
+function createScanResultEffects(mode) {
   // Remove any existing scan effects
   document.querySelectorAll('.scan-effect-particle').forEach(p => p.remove());
-  
-  const color = isUnsafe ? 'rgba(244, 67, 54, 0.4)' : 'rgba(76, 175, 80, 0.4)';
-  const glowColor = isUnsafe ? '#f44336' : '#4caf50';
+
+  const isUnsafe = mode === 'unsafe';
+  const isCaution = mode === 'caution';
+  const color = isUnsafe
+    ? 'rgba(244, 67, 54, 0.4)'
+    : isCaution
+      ? 'rgba(245, 158, 11, 0.4)'
+      : 'rgba(76, 175, 80, 0.4)';
+  const glowColor = isUnsafe
+    ? '#f44336'
+    : isCaution
+      ? '#f59e0b'
+      : '#4caf50';
   
   // Create 25 particles for a nice effect
   const particleCount = 25;
@@ -3144,329 +3348,1082 @@ function createScanResultEffects(isUnsafe) {
   }, 400);
 }
 
-// ============== Detailed scan breakdown dialogs ==============
-// These dialogs intentionally build their contents with textContent instead of
-// interpolating scanner data into HTML. URLs and server responses are untrusted.
-const HEURISTIC_FLAG_DETAILS = Object.freeze({
-  httpnotencrypted: ['HTTP not encrypted', 'The address uses HTTP instead of HTTPS.'],
-  ipliteralhost: ['IP address host', 'The URL uses a raw IP address instead of a domain name.'],
-  punycodehost: ['Punycode / internationalized domain', 'The hostname contains encoded international characters that can be used for lookalike domains.'],
-  suspicioustld: ['Suspicious top-level domain', 'The domain ending is frequently seen in low-trust or short-lived sites.'],
-  manysubdomains: ['Many subdomains', 'An unusually deep hostname can be used to disguise the real registered domain.'],
-  manyhyphens: ['Many hyphens', 'Excessive hyphens can indicate a lookalike or misleading hostname.'],
-  longhostname: ['Long hostname', 'The hostname is unusually long and may be designed to hide important parts of the address.'],
-  longurl: ['Long URL', 'The full address is unusually long and deserves closer review.'],
-  suspiciousport: ['Unusual port', 'The address uses a non-standard network port.'],
-  manyencodedchars: ['Heavy URL encoding', 'The address contains many encoded characters that can obscure its destination.'],
-  linkshortener: ['Link shortener', 'A shortened link hides the final destination until it is opened.'],
-  phishykeywords: ['Phishing-related wording', 'The address contains words frequently used in account, login, verification, or reward scams.'],
-  tldhelpwithrewardpattern: ['Suspicious reward pattern', 'A low-trust domain ending appears together with reward-related wording.'],
-  typosquatleetspeak: ['Possible typosquatting', 'The hostname may imitate a familiar name using misspellings or character substitutions.'],
-  domainnotfound: ['Domain not found', 'DNS could not resolve the hostname. The address may be mistyped, expired, or fabricated.']
-});
-
-function normalizeFlagKey(flag) {
-  return String(flag || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function createDetailsModal(title, subtitle) {
-  document.querySelectorAll('.details-modal-overlay').forEach((existing) => existing.remove());
-
-  const previouslyFocused = document.activeElement;
-  const previousOverflow = document.body.style.overflow;
-  const overlay = document.createElement('div');
-  overlay.className = 'details-modal-overlay';
-
-  const dialog = document.createElement('section');
-  dialog.className = 'details-modal';
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-labelledby', 'scanDetailsModalTitle');
-  dialog.tabIndex = -1;
-
-  const header = document.createElement('div');
-  header.className = 'details-modal__header';
-
-  const headingGroup = document.createElement('div');
-  const heading = document.createElement('h2');
-  heading.id = 'scanDetailsModalTitle';
-  heading.className = 'details-modal__title';
-  heading.textContent = title;
-  headingGroup.appendChild(heading);
-
-  if (subtitle) {
-    const description = document.createElement('p');
-    description.className = 'details-modal__subtitle';
-    description.textContent = subtitle;
-    headingGroup.appendChild(description);
-  }
-
-  const closeButton = document.createElement('button');
-  closeButton.type = 'button';
-  closeButton.className = 'details-modal__close';
-  closeButton.textContent = '×';
-  closeButton.setAttribute('aria-label', 'Close scan details');
-
-  const body = document.createElement('div');
-  body.className = 'details-modal__body';
-
-  header.append(headingGroup, closeButton);
-  dialog.append(header, body);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
-  document.body.style.overflow = 'hidden';
-
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    document.removeEventListener('keydown', onKeyDown);
-    overlay.classList.add('details-modal-overlay--closing');
-    window.setTimeout(() => {
-      overlay.remove();
-      document.body.style.overflow = previousOverflow;
-      if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
-    }, 160);
-  };
-  const onKeyDown = (event) => {
-    if (event.key === 'Escape') close();
-  };
-
-  closeButton.addEventListener('click', close);
-  overlay.addEventListener('click', (event) => {
-    if (event.target === overlay) close();
-  });
-  document.addEventListener('keydown', onKeyDown);
-  window.requestAnimationFrame(() => dialog.focus());
-
-  return { body, close };
-}
-
-function appendMetric(parent, label, value, tone) {
-  const metric = document.createElement('div');
-  metric.className = `details-metric${tone ? ` details-metric--${tone}` : ''}`;
-  const labelElement = document.createElement('span');
-  labelElement.className = 'details-metric__label';
-  labelElement.textContent = label;
-  const valueElement = document.createElement('strong');
-  valueElement.className = 'details-metric__value';
-  valueElement.textContent = String(value ?? 'Unknown');
-  metric.append(labelElement, valueElement);
-  parent.appendChild(metric);
-}
-
-function appendDetailCard(parent, title, score, description, status) {
-  const card = document.createElement('article');
-  card.className = `details-card details-card--${status || 'neutral'}`;
-  const cardHeader = document.createElement('div');
-  cardHeader.className = 'details-card__header';
-  const heading = document.createElement('h3');
-  heading.textContent = title || 'Security check';
-  const scoreElement = document.createElement('span');
-  scoreElement.className = 'details-card__score';
-  scoreElement.textContent = score;
-  const text = document.createElement('p');
-  text.textContent = description || 'No additional information was returned.';
-  cardHeader.append(heading, scoreElement);
-  card.append(cardHeader, text);
-  parent.appendChild(card);
-  return card;
-}
-
-function getFlagPresentation(flag) {
-  const rawName = typeof flag === 'object' && flag !== null ? (flag.name || flag.code || flag.flag) : flag;
-  const fallbackName = String(rawName || 'Detected risk factor').replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-  const known = HEURISTIC_FLAG_DETAILS[normalizeFlagKey(rawName)];
-  return {
-    name: known?.[0] || fallbackName,
-    description: (typeof flag === 'object' && flag !== null && flag.description) || known?.[1] || 'The scanner marked this characteristic for review.',
-    points: typeof flag === 'object' && flag !== null && Number.isFinite(Number(flag.points)) ? Number(flag.points) : null
-  };
-}
-
-function showHeuristicDetailsModal(heuristics) {
-  const data = heuristics || {};
-  const flags = Array.isArray(data.flags) ? data.flags : [];
-  const score = Number.isFinite(Number(data.score)) ? Number(data.score) : 0;
-  const risk = String(data.risk || (score >= 35 ? 'high' : score >= 18 ? 'medium' : 'low')).toLowerCase();
-  const modal = createDetailsModal('Heuristic analysis', 'URL characteristics detected before opening the site.');
-
-  const summary = document.createElement('div');
-  summary.className = 'details-metrics';
-  appendMetric(summary, 'Risk points', `${score}`, risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'safe');
-  appendMetric(summary, 'Risk level', risk.toUpperCase(), risk === 'high' ? 'danger' : risk === 'medium' ? 'warning' : 'safe');
-  appendMetric(summary, 'Flags found', flags.length);
-  modal.body.appendChild(summary);
-
-  const list = document.createElement('div');
-  list.className = 'details-card-list';
-  if (flags.length) {
-    flags.forEach((flag) => {
-      const detail = getFlagPresentation(flag);
-      appendDetailCard(list, detail.name, detail.points === null ? 'Flagged' : `+${detail.points} points`, detail.description, detail.points >= 30 ? 'danger' : detail.points >= 10 ? 'warning' : 'neutral');
-    });
-  } else {
-    appendDetailCard(list, 'No heuristic flags', '0 flags', 'The URL structure did not trigger the scanner’s heuristic rules.', 'safe');
-  }
-  modal.body.appendChild(list);
-}
-
-function showExternalLinksModal(externalLinksData) {
-  const data = externalLinksData || {};
-  const links = Array.isArray(data.links) ? data.links : [];
-  const count = typeof data.count === 'number' ? data.count : links.length || null;
-  const modal = createDetailsModal('External links', 'Links on the scanned page that lead to another hostname.');
-
-  const summary = document.createElement('div');
-  summary.className = 'details-metrics';
-  appendMetric(summary, 'Detected', count === null ? 'Unavailable' : count);
-  appendMetric(summary, 'Listed', links.length);
-  modal.body.appendChild(summary);
-
-  if (data.skipped || data.error) {
-    appendDetailCard(
-      modal.body,
-      data.skipped ? 'Content analysis was skipped' : 'Content analysis was incomplete',
-      'Info',
-      data.error || 'The page content was not fetched, so individual external links are unavailable.',
-      'neutral'
-    );
-  }
-
-  if (!links.length) {
-    if (!data.skipped && !data.error) {
-      appendDetailCard(modal.body, count === 0 ? 'No external links detected' : 'Link list unavailable', count === 0 ? 'Clear' : 'Info', count === 0 ? 'No links to a different hostname were returned by the scan.' : 'Only the total count was available for this scan.', count === 0 ? 'safe' : 'neutral');
-    }
-    return;
-  }
-
-  const list = document.createElement('ol');
-  list.className = 'details-link-list';
-  links.forEach((linkValue) => {
-    try {
-      const parsed = new URL(String(linkValue));
-      if (!['http:', 'https:'].includes(parsed.protocol)) return;
-      const item = document.createElement('li');
-      const link = document.createElement('a');
-      link.href = parsed.href;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = parsed.href;
-      item.appendChild(link);
-      list.appendChild(item);
-    } catch (_) {
-      // Ignore malformed values returned by a remote page.
-    }
-  });
-  modal.body.appendChild(list);
-}
-
-function showBreakdownEntryModal(entry, scanData) {
-  if (entry?.category === 'Heuristic Analysis' && scanData?.localScan?.heuristics) {
-    showHeuristicDetailsModal(scanData.localScan.heuristics);
-    return;
-  }
-
-  const title = entry?.category || 'Security check';
-  const modal = createDetailsModal(title, 'How this check contributed to the final scan result.');
-  const points = Number(entry?.points) || 0;
-  const status = String(entry?.status || (points > 0 ? 'warning' : 'safe')).toLowerCase();
-  const summary = document.createElement('div');
-  summary.className = 'details-metrics';
-  appendMetric(summary, 'Risk points', points, status === 'unsafe' || status === 'danger' ? 'danger' : status === 'warning' || status === 'caution' ? 'warning' : 'safe');
-  appendMetric(summary, 'Check status', status.toUpperCase());
-  modal.body.appendChild(summary);
-  appendDetailCard(modal.body, title, `${points} risk points`, entry?.description || 'No issue was reported by this check.', status);
-
-  const flags = Array.isArray(entry?.flags) ? entry.flags : [];
-  if (flags.length) {
-    const flagList = document.createElement('div');
-    flagList.className = 'details-card-list';
-    flags.forEach((flag) => {
-      const detail = getFlagPresentation(flag);
-      appendDetailCard(flagList, detail.name, detail.points === null ? 'Flagged' : `+${detail.points} points`, detail.description, 'warning');
-    });
-    modal.body.appendChild(flagList);
-  }
-}
-
-function showRiskScoreModal(scanData) {
-  const data = scanData || {};
-  const local = data.localScan || {};
-  const safety = Number.isFinite(Number(data.safetyRating)) ? Number(data.safetyRating) : null;
-  const status = String(data.status || 'unknown').toLowerCase();
-  const modal = createDetailsModal('Complete scan breakdown', 'Every check returned for this scan, shown on one consistent risk-point scale.');
-
-  const summary = document.createElement('div');
-  summary.className = 'details-metrics details-metrics--primary';
-  appendMetric(summary, 'Safety rating', safety === null ? 'Unknown' : `${safety}%`, safety !== null && safety >= 70 ? 'safe' : safety !== null && safety >= 30 ? 'warning' : 'danger');
-  appendMetric(summary, 'Risk score', Number.isFinite(Number(data.risk)) ? Number(data.risk) : 'Unknown', status === 'unsafe' ? 'danger' : status === 'caution' ? 'warning' : 'safe');
-  appendMetric(summary, 'Verdict', status.toUpperCase(), status === 'unsafe' ? 'danger' : status === 'caution' ? 'warning' : 'safe');
-  appendMetric(summary, 'Category', data.category || 'Unknown');
-  modal.body.appendChild(summary);
-
-  const breakdown = Array.isArray(local.scoreBreakdown) ? local.scoreBreakdown : [];
-  const list = document.createElement('div');
-  list.className = 'details-card-list';
-  if (breakdown.length) {
-    breakdown.forEach((entry) => {
-      const points = Number(entry?.points) || 0;
-      const entryStatus = String(entry?.status || (points > 0 ? 'warning' : 'safe')).toLowerCase();
-      const flags = Array.isArray(entry?.flags) ? entry.flags : [];
-      const flagSummary = flags.map((flag) => getFlagPresentation(flag).name).join(', ');
-      appendDetailCard(list, entry?.category || 'Security check', `${points} risk points`, flagSummary || entry?.description || 'No issue found.', entryStatus);
-    });
-  } else if (local.heuristics || local.blocklist || local.gsb || local.dns || local.tls) {
-    if (local.heuristics && !local.heuristics.skipped) appendDetailCard(list, 'Heuristic analysis', `${Number(local.heuristics.score) || 0} risk points`, `${Array.isArray(local.heuristics.flags) ? local.heuristics.flags.length : 0} URL flags detected.`, (Number(local.heuristics.score) || 0) > 0 ? 'warning' : 'safe');
-    if (local.gsb?.enabled) appendDetailCard(list, 'Google Safe Browsing', local.gsb.verdict === 'unsafe' ? '100 risk points' : '0 risk points', `Verdict: ${local.gsb.verdict || 'unknown'}.`, local.gsb.verdict === 'unsafe' ? 'danger' : local.gsb.verdict === 'safe' ? 'safe' : 'neutral');
-    if (local.blocklist) appendDetailCard(list, 'Local blocklist', local.blocklist.match ? '100 risk points' : '0 risk points', local.blocklist.match ? 'A blocklist match was found.' : 'No blocklist match was found.', local.blocklist.match ? 'danger' : 'safe');
-    if (local.dns && !local.dns.skipped) appendDetailCard(list, 'DNS lookup', local.dns.ok ? '0 risk points' : 'Check failed', local.dns.ok ? 'The hostname resolved successfully.' : (local.dns.error || 'The hostname did not resolve.'), local.dns.ok ? 'safe' : 'danger');
-    if (local.tls && !local.tls.skipped) appendDetailCard(list, 'SSL / TLS', local.tls.error ? 'Unavailable' : local.tls.ok ? '0 risk points' : 'Check failed', local.tls.error || (local.tls.ok ? 'The certificate check passed.' : 'The certificate check failed.'), local.tls.error ? 'neutral' : local.tls.ok ? 'safe' : 'danger');
-  } else {
-    appendDetailCard(list, 'Browser-only scan', 'Limited detail', 'The local scanner API was unavailable, so this result uses URL and browser-side checks only.', 'neutral');
-  }
-  modal.body.appendChild(list);
-
-  const reasons = Array.isArray(data.reasons) ? data.reasons.filter(Boolean) : [];
-  if (reasons.length) {
-    const reasonsSection = document.createElement('section');
-    reasonsSection.className = 'details-reasons';
-    const heading = document.createElement('h3');
-    heading.textContent = 'Why this verdict was shown';
-    const reasonList = document.createElement('ul');
-    reasons.forEach((reason) => {
-      const item = document.createElement('li');
-      item.textContent = String(reason);
-      reasonList.appendChild(item);
-    });
-    reasonsSection.append(heading, reasonList);
-    modal.body.appendChild(reasonsSection);
-  }
-}
-
 // Enhanced page status function with visual effects (OPTIMIZED)
 function setPageStatusEnhanced(isAllSafe, anyUnsafe) {
   // Remove existing scan classes
-  document.body.classList.remove("scan-safe", "scan-unsafe");
+  document.body.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
+  document.documentElement.classList.remove("scan-safe", "scan-unsafe", "scan-caution");
   
   if (anyUnsafe) {
     document.body.classList.add("scan-unsafe");
-    createScanResultEffects(true);
+    document.documentElement.classList.add("scan-unsafe");
+    createScanResultEffects('unsafe');
     
     // Add pulsing border to viewport
     document.body.style.boxShadow = 'inset 0 0 50px rgba(244, 67, 54, 0.3)';
     
   } else if (isAllSafe) {
     document.body.classList.add("scan-safe");
-    createScanResultEffects(false);
+    document.documentElement.classList.add("scan-safe");
+    createScanResultEffects('safe');
     
     // Add pulsing border to viewport
     document.body.style.boxShadow = 'inset 0 0 50px rgba(76, 175, 80, 0.3)';
+  } else if (!isAllSafe && !anyUnsafe) {
+    document.body.classList.add("scan-caution");
+    document.documentElement.classList.add("scan-caution");
+    createScanResultEffects('caution');
+    document.body.style.boxShadow = 'inset 0 0 50px rgba(245, 158, 11, 0.3)';
   } else {
     // Reset effects for neutral state
     document.body.style.boxShadow = '';
     document.querySelectorAll('.scan-effect-particle').forEach(p => p.remove());
   }
+}
+
+// ============== Modal Functions for Clickable Details ==============
+
+/**
+ * Show heuristic analysis details in a modal
+ */
+function showHeuristicDetailsModal(heuristics) {
+  // Check if dark mode is active
+  const isDarkMode = document.body.classList.contains('theme-dark');
+  
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.className = 'details-modal-overlay';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, ${isDarkMode ? '0.85' : '0.7'});
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease;
+  `;
+  
+  // Create modal content
+  const modalContent = document.createElement('div');
+  modalContent.className = 'details-modal-content';
+  const bgColor = isDarkMode ? '#1e293b' : 'white';
+  const textColor = isDarkMode ? '#e2e8f0' : '#333';
+  const borderColor = isDarkMode ? '#334155' : '#e5e7eb';
+  
+  modalContent.style.cssText = `
+    background: ${bgColor};
+    color: ${textColor};
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, ${isDarkMode ? '0.6' : '0.3'});
+    border: 1px solid ${borderColor};
+    animation: slideUp 0.3s ease;
+  `;
+  
+  // Flag descriptions
+  const flagDescriptions = {
+    'http_not_encrypted': { name: 'HTTP Not Encrypted', points: 100, description: 'Site uses insecure HTTP instead of HTTPS' },
+    'ip_literal_host': { name: 'IP Address Host', points: 30, description: 'URL uses IP address instead of domain name' },
+    'punycode_host': { name: 'Punycode/IDN', points: 15, description: 'Domain contains internationalized characters (potential spoofing)' },
+    'suspicious_tld': { name: 'Suspicious TLD', points: 10, description: 'Top-level domain commonly used for phishing (.xyz, .top, etc.)' },
+    'many_subdomains': { name: 'Many Subdomains', points: 10, description: 'Excessive subdomains detected (potential obfuscation)' },
+    'many_hyphens': { name: 'Many Hyphens', points: 8, description: 'URL contains many hyphens (potential typosquatting)' },
+    'long_hostname': { name: 'Long Hostname', points: 8, description: 'Domain name is unusually long' },
+    'long_path': { name: 'Long URL Path', points: 6, description: 'URL path is unusually long' },
+    'long_query': { name: 'Long Query String', points: 6, description: 'Query parameters are unusually long' },
+    'high_host_entropy': { name: 'High Hostname Entropy', points: 10, description: 'Domain appears random or obfuscated' },
+    'high_path_entropy': { name: 'High Path Entropy', points: 6, description: 'URL path appears random or obfuscated' },
+    'at_in_path': { name: '@ Symbol in Path', points: 8, description: 'URL path contains @ symbol (potential credential phishing)' },
+    'many_encoded_chars': { name: 'Many Encoded Characters', points: 6, description: 'Excessive URL encoding detected' },
+    'link_shortener': { name: 'Link Shortener', points: 6, description: 'URL uses a link shortening service' },
+    'phishy_keywords': { name: 'Phishing Keywords', points: 10, description: 'Contains keywords commonly used in phishing (login, verify, secure, etc.)' },
+    'tld_help_with_reward_pattern': { name: 'Suspicious Pattern', points: 12, description: 'Suspicious TLD combined with reward-related keywords' },
+    'typosquat_leetspeak': { name: 'Typosquatting/Leetspeak', points: 14, description: 'Domain appears to mimic a legitimate brand using number substitutions' }
+  };
+  
+  // Theme-aware colors
+  const titleColor = isDarkMode ? '#e2e8f0' : '#333';
+  const buttonColor = isDarkMode ? '#94a3b8' : '#666';
+  const buttonHoverBg = isDarkMode ? '#334155' : '#f5f5f5';
+  const boxBg = isDarkMode ? '#0f172a' : '#f5f5f5';
+  const labelColor = isDarkMode ? '#94a3b8' : '#666';
+  const cardBg = isDarkMode ? '#0f172a' : 'white';
+  const cardBorder = isDarkMode ? '#334155' : '#e5e7eb';
+  
+  // Build modal HTML
+  let html = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: ${titleColor};">🧠 Heuristic Analysis Details</h2>
+      <button class="modal-close-btn" style="background: none; border: none; font-size: 28px; cursor: pointer; color: ${buttonColor}; padding: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s;">×</button>
+    </div>
+    
+    <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid ${cardBorder};">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span style="font-weight: bold; color: ${labelColor};">Total Risk Score:</span>
+        <span style="font-weight: bold; color: ${heuristics.score >= 35 ? '#f44336' : heuristics.score >= 18 ? '#ff9800' : '#4caf50'}; font-size: 18px;">${heuristics.score}/100</span>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="font-weight: bold; color: ${labelColor};">Risk Level:</span>
+        <span style="font-weight: bold; color: ${heuristics.risk === 'high' ? '#f44336' : heuristics.risk === 'medium' ? '#ff9800' : '#4caf50'}; text-transform: uppercase;">${heuristics.risk}</span>
+      </div>
+    </div>
+  `;
+  
+  if (heuristics.flags && heuristics.flags.length > 0) {
+    html += `<h3 style="margin-top: 0; color: ${labelColor}; font-size: 16px; margin-bottom: 15px;">Detected Flags:</h3>`;
+    
+    heuristics.flags.forEach(flag => {
+      const flagInfo = flagDescriptions[flag] || { 
+        name: flag.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), 
+        points: 0, 
+        description: 'Risk factor detected' 
+      };
+      
+      const severity = flagInfo.points >= 30 ? 'high' : (flagInfo.points >= 10 ? 'medium' : 'low');
+      const severityColor = severity === 'high' ? '#f44336' : (severity === 'medium' ? '#ff9800' : '#2196f3');
+      const flagCardBg = isDarkMode ? '#0f172a' : 'white';
+      const flagTextColor = isDarkMode ? '#e2e8f0' : '#333';
+      const flagDescColor = isDarkMode ? '#94a3b8' : '#666';
+      
+      html += `
+        <div style="background: ${flagCardBg}; border-left: 4px solid ${severityColor}; padding: 15px; margin-bottom: 12px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,${isDarkMode ? '0.3' : '0.1'}); border: 1px solid ${cardBorder};">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+            <span style="font-weight: bold; color: ${flagTextColor}; flex: 1;">${flagInfo.name}</span>
+            <span style="background: ${severityColor}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; white-space: nowrap; margin-left: 10px;">+${flagInfo.points} pts</span>
+          </div>
+          <div style="color: ${flagDescColor}; font-size: 14px; line-height: 1.5;">${flagInfo.description}</div>
+        </div>
+      `;
+    });
+  } else {
+    html += `<div style="text-align: center; color: #4caf50; padding: 20px;">✅ No risk flags detected - URL appears clean</div>`;
+  }
+  
+  modalContent.innerHTML = html;
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+  
+  // Add CSS animations
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .modal-close-btn:hover {
+      background: ${buttonHoverBg} !important;
+      color: ${isDarkMode ? '#e2e8f0' : '#333'} !important;
+    }
+    .details-modal-content::-webkit-scrollbar {
+      width: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-track {
+      background: ${isDarkMode ? '#0f172a' : '#f5f5f5'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb {
+      background: ${isDarkMode ? '#475569' : '#cbd5e1'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb:hover {
+      background: ${isDarkMode ? '#64748b' : '#94a3b8'};
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Close modal on overlay click or close button
+  const closeModal = () => {
+    modal.style.animation = 'fadeOut 0.2s ease';
+    setTimeout(() => {
+      document.body.removeChild(modal);
+      document.head.removeChild(style);
+    }, 200);
+  };
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  modalContent.querySelector('.modal-close-btn').addEventListener('click', closeModal);
+  
+  // Add fadeOut animation
+  style.textContent += `
+    @keyframes fadeOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+  `;
+}
+
+/**
+ * Show external links details in a modal
+ */
+function showExternalLinksModal(externalLinksData) {
+  // Check if dark mode is active
+  const isDarkMode = document.body.classList.contains('theme-dark');
+  
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.className = 'details-modal-overlay';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, ${isDarkMode ? '0.85' : '0.7'});
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease;
+  `;
+  
+  // Create modal content
+  const modalContent = document.createElement('div');
+  modalContent.className = 'details-modal-content';
+  const bgColor = isDarkMode ? '#1e293b' : 'white';
+  const textColor = isDarkMode ? '#e2e8f0' : '#333';
+  const borderColor = isDarkMode ? '#334155' : '#e5e7eb';
+  
+  modalContent.style.cssText = `
+    background: ${bgColor};
+    color: ${textColor};
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 700px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, ${isDarkMode ? '0.6' : '0.3'});
+    border: 1px solid ${borderColor};
+    animation: slideUp 0.3s ease;
+  `;
+  
+  // Theme-aware colors
+  const titleColor = isDarkMode ? '#e2e8f0' : '#333';
+  const buttonColor = isDarkMode ? '#94a3b8' : '#666';
+  const buttonHoverBg = isDarkMode ? '#334155' : '#f5f5f5';
+  const boxBg = isDarkMode ? '#0f172a' : '#f5f5f5';
+  const labelColor = isDarkMode ? '#94a3b8' : '#666';
+  const cardBg = isDarkMode ? '#0f172a' : 'white';
+  const cardBorder = isDarkMode ? '#334155' : '#e5e7eb';
+  const linkColor = isDarkMode ? '#60a5fa' : '#2196f3';
+  const numberColor = isDarkMode ? '#64748b' : '#999';
+  
+  // Build modal HTML
+  let html = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: ${titleColor};">🔗 External Links Found</h2>
+      <button class="modal-close-btn" style="background: none; border: none; font-size: 28px; cursor: pointer; color: ${buttonColor}; padding: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s;">×</button>
+    </div>
+  `;
+  
+  if (externalLinksData.links && externalLinksData.links.length > 0) {
+    html += `
+      <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid ${cardBorder};">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-weight: bold; color: ${labelColor};">Total External Links:</span>
+          <span style="font-weight: bold; color: ${linkColor}; font-size: 18px;">${externalLinksData.links.length}</span>
+        </div>
+      </div>
+      
+      <h3 style="margin-top: 0; color: ${labelColor}; font-size: 16px; margin-bottom: 15px;">Link List:</h3>
+      <div style="max-height: 400px; overflow-y: auto;">
+    `;
+    
+    externalLinksData.links.forEach((link, index) => {
+      const displayUrl = link.length > 80 ? link.substring(0, 77) + '...' : link;
+      html += `
+        <div style="background: ${cardBg}; border-left: 4px solid ${linkColor}; padding: 12px 15px; margin-bottom: 10px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,${isDarkMode ? '0.3' : '0.1'}); border: 1px solid ${cardBorder};">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <span style="color: ${numberColor}; font-size: 12px; min-width: 30px;">#${index + 1}</span>
+            <a href="${link}" target="_blank" rel="noopener noreferrer" style="color: ${linkColor}; text-decoration: none; flex: 1; word-break: break-all; font-size: 14px;" title="${link}">${displayUrl}</a>
+            <span style="font-size: 18px;">🔗</span>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+  } else {
+    html += `<div style="text-align: center; color: ${labelColor}; padding: 20px;">No external links detected on this page</div>`;
+  }
+  
+  modalContent.innerHTML = html;
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+  
+  // Add CSS animations and styling
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+    .modal-close-btn:hover {
+      background: ${buttonHoverBg} !important;
+      color: ${isDarkMode ? '#e2e8f0' : '#333'} !important;
+    }
+    .details-modal-content::-webkit-scrollbar {
+      width: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-track {
+      background: ${isDarkMode ? '#0f172a' : '#f5f5f5'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb {
+      background: ${isDarkMode ? '#475569' : '#cbd5e1'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb:hover {
+      background: ${isDarkMode ? '#64748b' : '#94a3b8'};
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Close modal on overlay click or close button
+  const closeModal = () => {
+    modal.style.animation = 'fadeOut 0.2s ease';
+    setTimeout(() => {
+      document.body.removeChild(modal);
+      document.head.removeChild(style);
+    }, 200);
+  };
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  modalContent.querySelector('.modal-close-btn').addEventListener('click', closeModal);
+}
+
+/**
+ * Show risk score breakdown in a modal
+ */
+function showRiskScoreModal(scanData) {
+  // Check if dark mode is active
+  const isDarkMode = document.body.classList.contains('theme-dark');
+  
+  // Create modal overlay
+  const modal = document.createElement('div');
+  modal.className = 'details-modal-overlay';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, ${isDarkMode ? '0.85' : '0.7'});
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease;
+  `;
+  
+  // Create modal content
+  const modalContent = document.createElement('div');
+  modalContent.className = 'details-modal-content';
+  const bgColor = isDarkMode ? '#1e293b' : 'white';
+  const textColor = isDarkMode ? '#e2e8f0' : '#333';
+  const borderColor = isDarkMode ? '#334155' : '#e5e7eb';
+  
+  modalContent.style.cssText = `
+    background: ${bgColor};
+    color: ${textColor};
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 650px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, ${isDarkMode ? '0.6' : '0.3'});
+    border: 1px solid ${borderColor};
+    animation: slideUp 0.3s ease;
+  `;
+  
+  // Theme-aware colors
+  const titleColor = isDarkMode ? '#e2e8f0' : '#333';
+  const buttonColor = isDarkMode ? '#94a3b8' : '#666';
+  const buttonHoverBg = isDarkMode ? '#334155' : '#f5f5f5';
+  const boxBg = isDarkMode ? '#0f172a' : '#f5f5f5';
+  const labelColor = isDarkMode ? '#94a3b8' : '#666';
+  const cardBg = isDarkMode ? '#0f172a' : 'white';
+  const cardBorder = isDarkMode ? '#334155' : '#e5e7eb';
+  
+  // Determine status color
+  const statusColor = scanData.status === 'safe' ? '#4caf50' : 
+                     scanData.status === 'caution' ? '#ff9800' : '#f44336';
+  
+  // Calculate Risk Level (inverse of Safety Score)
+  const riskLevel = 100 - scanData.safetyRating;
+  
+  // Get heuristic data - the ACTUAL score calculated by the backend
+  const heuristicScore = scanData.localScan && scanData.localScan.heuristics ? (scanData.localScan.heuristics.score || 0) : 0;
+  const heuristicFlags = scanData.localScan && scanData.localScan.heuristics ? (scanData.localScan.heuristics.flags || []) : [];
+  
+  // Get additional data for detailed Step 3 breakdown
+  const externalLinks = scanData.externalLinks || (scanData.localScan && scanData.localScan.externalLinks ? scanData.localScan.externalLinks.count : null);
+  const misspellings = scanData.misspellings || 0;
+  const categoryTrusted = scanData.categoryTrusted || false;
+  
+  // Reconstruct the Step 3 calculation to show EXACTLY what happened
+  let step3StartingSafety = 100 - heuristicScore;
+  let step3CurrentSafety = step3StartingSafety;
+  const step3Penalties = [];
+  
+  // Check for external links penalties
+  if (typeof externalLinks === 'number') {
+    if (externalLinks > 50) {
+      step3Penalties.push({
+        name: 'High External Links',
+        detail: `${externalLinks} external links detected (> 50 threshold)`,
+        penalty: 20,
+        formula: `${step3CurrentSafety}% - 20% = ${step3CurrentSafety - 20}%`
+      });
+      step3CurrentSafety -= 20;
+    } else if (externalLinks > 20) {
+      step3Penalties.push({
+        name: 'Many External Links',
+        detail: `${externalLinks} external links detected (> 20 threshold)`,
+        penalty: 12,
+        formula: `${step3CurrentSafety}% - 12% = ${step3CurrentSafety - 12}%`
+      });
+      step3CurrentSafety -= 12;
+    } else if (externalLinks > 10) {
+      step3Penalties.push({
+        name: 'Some External Links',
+        detail: `${externalLinks} external links detected (> 10 threshold)`,
+        penalty: 6,
+        formula: `${step3CurrentSafety}% - 6% = ${step3CurrentSafety - 6}%`
+      });
+      step3CurrentSafety -= 6;
+    }
+  }
+  
+  // Check for misspellings penalty
+  if (misspellings > 0) {
+    step3Penalties.push({
+      name: 'Misspellings Detected',
+      detail: `${misspellings} common misspellings found`,
+      penalty: 10,
+      formula: `${step3CurrentSafety}% - 10% = ${step3CurrentSafety - 10}%`
+    });
+    step3CurrentSafety -= 10;
+  }
+  
+  // Check for blocklist cap
+  if (scanData.localScan && scanData.localScan.blocklist && scanData.localScan.blocklist.match) {
+    const beforeCap = step3CurrentSafety;
+    step3CurrentSafety = Math.min(step3CurrentSafety, 25);
+    if (beforeCap > 25) {
+      step3Penalties.push({
+        name: 'Blocklist Match',
+                    detail: 'URL found in blocklist',
+        penalty: beforeCap - 25,
+        formula: `min(${beforeCap}%, 25%) = 25%`,
+        isCap: true
+      });
+    }
+  }
+  
+  // Check for GSB cap
+  if (scanData.localScan && scanData.localScan.gsb && scanData.localScan.gsb.verdict === 'unsafe') {
+    const beforeCap = step3CurrentSafety;
+    step3CurrentSafety = Math.min(step3CurrentSafety, 20);
+    if (beforeCap > 20) {
+      step3Penalties.push({
+        name: 'Google Safe Browsing Threat',
+        detail: 'Flagged as unsafe by Google',
+        penalty: beforeCap - 20,
+        formula: `min(${beforeCap}%, 20%) = 20%`,
+        isCap: true
+      });
+    }
+  }
+  
+  // Check for trusted category reduction
+  if (categoryTrusted && step3CurrentSafety < 100) {
+    const beforeReduction = step3CurrentSafety;
+    const riskPortion = 100 - step3CurrentSafety;
+    const reducedRisk = Math.round(riskPortion * 0.6);
+    step3CurrentSafety = 100 - reducedRisk;
+    step3Penalties.push({
+      name: 'Trusted Category Bonus',
+      detail: 'Site in trusted category, risk reduced by 40%',
+      penalty: -(step3CurrentSafety - beforeReduction),
+      formula: `Risk: ${riskPortion} × 0.6 = ${reducedRisk}, Safety: 100 - ${reducedRisk} = ${step3CurrentSafety}%`,
+      isBonus: true
+    });
+  }
+  
+  // Calculate any remaining unexplained difference
+  const unexplainedDiff = step3CurrentSafety - scanData.safetyRating;
+  if (Math.abs(unexplainedDiff) > 0.5) {
+    step3Penalties.push({
+      name: 'Additional Adjustments',
+      detail: 'Other risk factors or rounding adjustments',
+      penalty: unexplainedDiff,
+      formula: `${step3CurrentSafety}% → ${scanData.safetyRating}%`
+    });
+  }
+  
+  // Flag point values (MUST match backend exactly!)
+  const flagPoints = {
+    'http_not_encrypted': 100,
+    'ip_literal_host': 30,
+    'ip_address': 30,  // Alternative name
+    'punycode_host': 15,
+    'punycode': 15,  // Alternative name
+    'suspicious_tld': 10,
+    'many_subdomains': 10,
+    'many_hyphens': 8,
+    'long_hostname': 8,
+    'long_path': 6,
+    'long_query': 6,
+    'high_host_entropy': 10,
+    'high_path_entropy': 6,
+    'at_in_path': 8,
+    'many_encoded_chars': 6,
+    'link_shortener': 6,
+    'phishy_keywords': 10,
+    'phishing_keywords': 10,  // Alternative name
+    'tld_help_with_reward_pattern': 12,
+    'suspicious_patterns': 12,  // Alternative name
+    'typosquat_leetspeak': 14
+  };
+  
+  // Calculate the ACTUAL total from detected flags to verify
+  let calculatedTotal = 0;
+  heuristicFlags.forEach(flag => {
+    calculatedTotal += (flagPoints[flag] || 0);
+  });
+  
+  // Build modal HTML
+  let html = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: ${titleColor};">📊 Risk Score Breakdown</h2>
+      <button class="modal-close-btn" style="background: none; border: none; font-size: 28px; cursor: pointer; color: ${buttonColor}; padding: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s;">×</button>
+    </div>
+    
+    <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid ${cardBorder};">
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span style="font-weight: bold; color: ${labelColor};">Safety Score:</span>
+        <span style="font-weight: bold; color: ${statusColor}; font-size: 18px;">${scanData.safetyRating}%</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+        <span style="font-weight: bold; color: ${labelColor};">Risk Level:</span>
+        <span style="font-weight: bold; color: ${statusColor}; text-transform: uppercase;">${scanData.risk} (${riskLevel})</span>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="font-weight: bold; color: ${labelColor};">Status:</span>
+        <span style="font-weight: bold; color: ${statusColor}; text-transform: uppercase;">${scanData.status}</span>
+      </div>
+    </div>
+    
+    <h3 style="margin-top: 0; color: ${titleColor}; font-size: 18px; margin-bottom: 15px; text-align: center; border-bottom: 2px solid ${statusColor}; padding-bottom: 10px;">🧮 COMPLETE CALCULATION - Step by Step Formula</h3>
+     
+    <!-- Show EVERY factor that contributes to risk -->
+    <div style="background: ${cardBg}; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 2px solid ${statusColor};">
+      
+      <!-- SECTION 1: URL PATTERN ANALYSIS (Heuristics) -->
+      <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #ff9800;">
+        <div style="color: ${textColor}; margin-bottom: 12px;">
+          <strong style="color: #ff9800; font-size: 16px;">📍 STEP 1: URL Pattern Analysis (Heuristics)</strong><br>
+          <span style="color: ${labelColor}; font-size: 13px;">Scanning the URL for suspicious patterns...</span>
+        </div>
+        
+        ${heuristicFlags.length > 0 ? `
+          <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+            <div style="color: ${labelColor}; font-size: 13px; margin-bottom: 10px;">
+              <strong>Detected Patterns:</strong>
+            </div>
+            ${heuristicFlags.map((flag, index) => {
+              const points = flagPoints[flag] || 0;
+              const flagName = flag.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              return `
+                <div style="padding: 8px; margin-bottom: 6px; background: ${isDarkMode ? '#1e293b' : '#f9fafb'}; border-radius: 4px; border-left: 3px solid #ff9800;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: ${textColor}; font-size: 14px; font-weight: 500;">${index + 1}. ${flagName}</span>
+                    <span style="color: #ff9800; font-weight: bold; font-size: 16px;">+${points} pts</span>
+                  </div>
+                  <div style="color: ${labelColor}; font-size: 12px; margin-top: 4px; font-style: italic;">
+                    Risk contribution: ${points} points
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            
+            <div style="border-top: 2px solid ${cardBorder}; margin-top: 15px; padding-top: 15px;">
+              <div style="background: ${isDarkMode ? '#1e293b' : '#fff3cd'}; padding: 12px; border-radius: 6px; border: 2px solid #ff9800;">
+                <div style="color: ${textColor}; font-size: 15px; font-family: 'Courier New', monospace; line-height: 2;">
+                  <strong style="color: ${labelColor};">Calculation:</strong><br>
+                  ${heuristicFlags.map((flag, index) => {
+                    const points = flagPoints[flag] || 0;
+                    return `${index > 0 ? '+ ' : ''}${points}`;
+                  }).join(' ')} = <strong style="color: #ff9800; font-size: 18px;">${calculatedTotal} points</strong>
+                </div>
+                <div style="color: ${labelColor}; font-size: 12px; margin-top: 8px; text-align: center;">
+                  Total Heuristic Risk Points
+                </div>
+              </div>
+            </div>
+          </div>
+        ` : `
+          <div style="background: ${isDarkMode ? '#0f172a' : '#e8f5e9'}; padding: 12px; border-radius: 6px; border: 2px solid #4caf50;">
+            <div style="color: #4caf50; font-size: 14px; font-weight: 500; text-align: center;">
+              ✅ No suspicious patterns detected
+            </div>
+            <div style="color: ${labelColor}; font-size: 13px; margin-top: 8px; text-align: center; font-family: 'Courier New', monospace;">
+              Heuristic Risk = <strong style="color: #4caf50;">0 points</strong>
+            </div>
+          </div>
+        `}
+        
+        <div style="background: ${isDarkMode ? '#1e293b' : '#f9fafb'}; padding: 12px; border-radius: 6px; margin-top: 12px; border: 2px solid ${statusColor};">
+          <div style="color: ${textColor}; font-size: 14px; text-align: center;">
+            <strong style="color: ${labelColor};">STEP 1 RESULT:</strong><br>
+            <span style="font-size: 20px; font-weight: bold; color: ${statusColor};">${heuristicScore} Heuristic Points</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- SECTION 2: BASE SAFETY SCORE CALCULATION -->
+      <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+        <div style="color: ${textColor}; margin-bottom: 12px;">
+          <strong style="color: #2196f3; font-size: 16px;">📍 STEP 2: Calculate Base Safety Score</strong><br>
+          <span style="color: ${labelColor}; font-size: 13px;">Convert heuristic risk to safety percentage...</span>
+        </div>
+        
+        <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 15px; border-radius: 6px;">
+          <div style="color: ${labelColor}; font-size: 13px; margin-bottom: 10px;">
+            <strong>Formula:</strong>
+          </div>
+          <div style="background: ${isDarkMode ? '#1e293b' : '#e3f2fd'}; padding: 15px; border-radius: 6px; border: 2px solid #2196f3; font-family: 'Courier New', monospace;">
+            <div style="color: ${textColor}; font-size: 15px; line-height: 2;">
+              Safety Score = 100 - Heuristic Points<br>
+              <span style="color: ${labelColor};">↓ Substitute values ↓</span><br>
+              Safety Score = 100 - ${heuristicScore}<br>
+              <span style="color: ${labelColor};">↓ Calculate ↓</span><br>
+              Safety Score = <strong style="color: #2196f3; font-size: 18px;">${100 - heuristicScore}%</strong>
+            </div>
+          </div>
+          
+          <div style="color: ${labelColor}; font-size: 12px; margin-top: 10px; text-align: center;">
+            💡 Lower heuristic risk = Higher safety
+          </div>
+        </div>
+        
+        <div style="background: ${isDarkMode ? '#1e293b' : '#f9fafb'}; padding: 12px; border-radius: 6px; margin-top: 12px; border: 2px solid #2196f3;">
+          <div style="color: ${textColor}; font-size: 14px; text-align: center;">
+            <strong style="color: ${labelColor};">STEP 2 RESULT:</strong><br>
+            <span style="font-size: 20px; font-weight: bold; color: #2196f3;">${100 - heuristicScore}% Safety</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- SECTION 3: ADDITIONAL SECURITY CHECKS AND PENALTIES -->
+      <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #9c27b0;">
+        <div style="color: ${textColor}; margin-bottom: 12px;">
+          <strong style="color: #9c27b0; font-size: 16px;">📍 STEP 3: Apply ALL Penalties & Adjustments</strong><br>
+          <span style="color: ${labelColor}; font-size: 13px;">Every single factor that affects the final safety score...</span>
+        </div>
+        
+        <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 15px; border-radius: 6px;">
+          
+          <!-- Starting Point -->
+          <div style="background: ${isDarkMode ? '#1e293b' : '#e3f2fd'}; padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 2px solid #2196f3;">
+            <div style="color: ${textColor}; font-size: 15px; font-weight: 600; margin-bottom: 8px;">
+              🎬 STARTING POINT (from Step 2):
+            </div>
+            <div style="color: ${labelColor}; font-size: 16px; font-family: 'Courier New', monospace; text-align: center; padding: 10px; background: ${isDarkMode ? '#0f172a' : 'white'}; border-radius: 4px;">
+              <strong style="color: #2196f3; font-size: 24px;">${step3StartingSafety}%</strong> Safety Score
+            </div>
+          </div>
+          
+          ${step3Penalties.length > 0 ? `
+            <!-- Show EACH penalty step by step -->
+            <div style="margin-bottom: 15px;">
+              <div style="color: ${textColor}; font-size: 14px; font-weight: 600; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid ${cardBorder};">
+                ⚡ PENALTIES & ADJUSTMENTS APPLIED:
+              </div>
+              
+              ${step3Penalties.map((penalty, index) => {
+                const isBonus = penalty.isBonus || penalty.penalty < 0;
+                const penaltyColor = penalty.isCap ? '#f44336' : (isBonus ? '#4caf50' : '#ff9800');
+                const icon = penalty.isCap ? '🚫' : (isBonus ? '✨' : '⚠️');
+                const sign = isBonus ? '+' : '-';
+                const absValue = Math.abs(penalty.penalty);
+                
+                return `
+                  <div style="background: ${isDarkMode ? '#1e293b' : '#fafafa'}; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid ${penaltyColor};">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                      <div>
+                        <div style="color: ${textColor}; font-size: 14px; font-weight: 600;">
+                          ${icon} ${index + 1}. ${penalty.name}
+                        </div>
+                        <div style="color: ${labelColor}; font-size: 12px; margin-top: 4px;">
+                          ${penalty.detail}
+                        </div>
+                      </div>
+                      <div style="background: ${penaltyColor}20; padding: 8px 12px; border-radius: 6px; border: 2px solid ${penaltyColor};">
+                        <span style="color: ${penaltyColor}; font-weight: bold; font-size: 16px;">
+                          ${sign}${absValue.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 10px; border-radius: 4px; margin-top: 8px;">
+                      <div style="color: ${labelColor}; font-size: 13px; font-family: 'Courier New', monospace; line-height: 1.8;">
+                        <strong style="color: ${textColor};">Calculation:</strong><br>
+                        ${penalty.formula}
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            
+            <!-- Show the step-by-step progression -->
+            <div style="background: ${isDarkMode ? '#1e293b' : '#fff3e0'}; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 2px solid #ff9800;">
+              <div style="color: ${textColor}; font-size: 14px; font-weight: 600; margin-bottom: 10px;">
+                📊 COMPLETE STEP-BY-STEP CALCULATION:
+              </div>
+              <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 12px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; line-height: 2;">
+                <div style="color: ${labelColor};">
+                  <strong style="color: #2196f3;">Start:</strong> ${step3StartingSafety}%<br>
+                  ${step3Penalties.map((penalty, index) => {
+                    const isBonus = penalty.isBonus || penalty.penalty < 0;
+                    const sign = isBonus ? '+' : '-';
+                    const absValue = Math.abs(penalty.penalty);
+                    let runningTotal = step3StartingSafety;
+                    
+                    // Calculate running total up to this point
+                    for (let i = 0; i <= index; i++) {
+                      if (step3Penalties[i].isBonus || step3Penalties[i].penalty < 0) {
+                        runningTotal += Math.abs(step3Penalties[i].penalty);
+                      } else {
+                        runningTotal -= Math.abs(step3Penalties[i].penalty);
+                      }
+                    }
+                    
+                    return `<strong style="color: ${isBonus ? '#4caf50' : (penalty.isCap ? '#f44336' : '#ff9800')}">${sign}${absValue.toFixed(1)}%</strong> ${penalty.name} → <strong style="color: ${textColor}">${runningTotal.toFixed(1)}%</strong><br>`;
+                  }).join('')}
+                  <div style="border-top: 2px solid ${cardBorder}; margin: 10px 0; padding-top: 10px;">
+                    <strong style="color: #9c27b0; font-size: 15px;">FINAL:</strong> <strong style="color: #9c27b0; font-size: 18px;">${scanData.safetyRating}%</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : `
+            <!-- No penalties applied -->
+            <div style="background: ${isDarkMode ? '#1e293b' : '#e8f5e9'}; padding: 15px; border-radius: 6px; border: 2px solid #4caf50; text-align: center;">
+              <div style="color: #4caf50; font-size: 16px; font-weight: 600; margin-bottom: 8px;">
+                ✅ NO PENALTIES APPLIED
+              </div>
+              <div style="color: ${labelColor}; font-size: 14px;">
+                No external links penalties, no blocklist match, no GSB threats detected
+              </div>
+              <div style="color: ${textColor}; font-size: 13px; margin-top: 10px; font-family: 'Courier New', monospace;">
+                Safety remains: <strong style="color: #4caf50; font-size: 16px;">${step3StartingSafety}%</strong>
+              </div>
+            </div>
+          `}
+          
+          <!-- Final Result Box -->
+          <div style="background: linear-gradient(135deg, ${isDarkMode ? '#1e293b' : '#f3e5f5'} 0%, ${isDarkMode ? '#0f172a' : '#e1bee7'} 100%); padding: 15px; border-radius: 8px; border: 3px solid #9c27b0; text-align: center;">
+            <div style="color: ${labelColor}; font-size: 13px; margin-bottom: 8px;">
+              🎯 STEP 3 FINAL RESULT
+            </div>
+            <div style="color: #9c27b0; font-size: 28px; font-weight: bold; margin-bottom: 8px;">
+              ${scanData.safetyRating}%
+            </div>
+            <div style="color: ${labelColor}; font-size: 13px;">
+              Final Safety Score
+              ${step3StartingSafety !== scanData.safetyRating ? 
+                `<br>(Changed from ${step3StartingSafety}% by ${(scanData.safetyRating - step3StartingSafety).toFixed(1)}%)` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- SECTION 4: FINAL RISK CALCULATION -->
+      <div style="background: ${boxBg}; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid ${statusColor};">
+        <div style="color: ${textColor}; margin-bottom: 12px;">
+          <strong style="color: ${statusColor}; font-size: 16px;">📍 STEP 4: Calculate Final Risk Level</strong><br>
+          <span style="color: ${labelColor}; font-size: 13px;">Convert final safety to risk score...</span>
+        </div>
+        
+        <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 15px; border-radius: 6px;">
+          <div style="color: ${labelColor}; font-size: 13px; margin-bottom: 10px;">
+            <strong>Formula:</strong>
+          </div>
+          <div style="background: ${isDarkMode ? '#1e293b' : statusColor === '#4caf50' ? '#e8f5e9' : (statusColor === '#ff9800' ? '#fff3e0' : '#ffebee')}; padding: 15px; border-radius: 6px; border: 2px solid ${statusColor}; font-family: 'Courier New', monospace;">
+            <div style="color: ${textColor}; font-size: 16px; line-height: 2.2;">
+              Risk Level = 100 - Final Safety Score<br>
+              <span style="color: ${labelColor}; font-size: 14px;">↓ Substitute values ↓</span><br>
+              Risk Level = 100 - ${scanData.safetyRating}%<br>
+              <span style="color: ${labelColor}; font-size: 14px;">↓ Calculate ↓</span><br>
+              Risk Level = <strong style="color: ${statusColor}; font-size: 22px; background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 8px 16px; border-radius: 6px; border: 2px solid ${statusColor};">${riskLevel}</strong>
+            </div>
+          </div>
+          
+          <div style="color: ${labelColor}; font-size: 12px; margin-top: 10px; text-align: center;">
+            💡 Higher safety = Lower risk
+          </div>
+        </div>
+        
+        <div style="background: ${isDarkMode ? '#1e293b' : '#f9fafb'}; padding: 12px; border-radius: 6px; margin-top: 12px; border: 2px solid ${statusColor};">
+          <div style="color: ${textColor}; font-size: 14px; text-align: center;">
+            <strong style="color: ${labelColor};">STEP 4 RESULT:</strong><br>
+            <span style="font-size: 20px; font-weight: bold; color: ${statusColor};">Risk Level ${riskLevel}</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- FINAL SUMMARY BOX -->
+      <div style="background: linear-gradient(135deg, ${isDarkMode ? '#1e293b' : '#f0f9ff'} 0%, ${isDarkMode ? '#0f172a' : '#e0f2fe'} 100%); padding: 20px; border-radius: 8px; border: 3px solid ${statusColor}; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+        <div style="text-align: center;">
+          <div style="color: ${statusColor}; font-size: 18px; font-weight: bold; margin-bottom: 15px;">
+            🎯 COMPLETE CALCULATION SUMMARY
+          </div>
+          
+          <div style="background: ${isDarkMode ? '#0f172a' : 'white'}; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 2px solid ${cardBorder};">
+            <div style="color: ${textColor}; font-size: 14px; line-height: 2; font-family: 'Courier New', monospace; text-align: left;">
+              <strong style="color: ${labelColor};">Step 1:</strong> Heuristic Analysis = ${heuristicScore} points<br>
+              <strong style="color: ${labelColor};">Step 2:</strong> Base Safety = 100 - ${heuristicScore} = ${100 - heuristicScore}%<br>
+              ${scanData.localScan && scanData.localScan.blocklist && scanData.localScan.blocklist.match ? 
+                `<strong style="color: ${labelColor};">Step 3a:</strong> Blocklist Cap = min(${100 - heuristicScore}%, 25%) = 25%<br>` : ''}
+              ${scanData.localScan && scanData.localScan.gsb && scanData.localScan.gsb.verdict === 'unsafe' ? 
+                `<strong style="color: ${labelColor};">Step 3b:</strong> GSB Cap = min(${scanData.localScan.blocklist && scanData.localScan.blocklist.match ? '25' : (100 - heuristicScore)}%, 20%) = 20%<br>` : ''}
+              <strong style="color: ${labelColor};">Step 3:</strong> Final Safety = ${scanData.safetyRating}%<br>
+              <strong style="color: ${labelColor};">Step 4:</strong> Risk Level = 100 - ${scanData.safetyRating}% = <strong style="color: ${statusColor}; font-size: 16px;">${riskLevel}</strong>
+            </div>
+          </div>
+          
+          <div style="background: ${statusColor}20; padding: 15px; border-radius: 8px; border: 2px solid ${statusColor};">
+            <div style="color: ${textColor}; font-size: 16px; margin-bottom: 8px;">
+              <strong>FINAL ANSWER:</strong>
+            </div>
+            <div style="color: ${statusColor}; font-size: 28px; font-weight: bold; margin-bottom: 8px;">
+              Risk Level: ${riskLevel}
+            </div>
+            <div style="color: ${labelColor}; font-size: 14px;">
+              ${heuristicFlags.length > 0 ? 
+                `Based on ${heuristicFlags.length} detected pattern${heuristicFlags.length > 1 ? 's' : ''} (${heuristicScore} pts)` : 
+                'No suspicious patterns detected'}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+          <span style="color: ${labelColor}; font-size: 13px; margin-top: 8px; display: block;">
+            ${heuristicFlags.length > 0 ? `${heuristicFlags.length} detected pattern${heuristicFlags.length > 1 ? 's' : ''} totaling ${heuristicScore} heuristic points` : 'No suspicious patterns detected (0 points)'}
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    <h3 style="margin-top: 0; color: ${labelColor}; font-size: 16px; margin-bottom: 15px;">🔍 Security Checks:</h3>
+  `;
+  
+  // Build checks array
+  const checks = [];
+  
+  // Heuristic Analysis
+  if (scanData.localScan && scanData.localScan.heuristics && !scanData.localScan.heuristics.skipped) {
+    const heur = scanData.localScan.heuristics;
+    const heurScore = heur.score || 0;
+    const heurStatus = heurScore === 0 ? 'safe' : (heurScore >= 35 ? 'unsafe' : (heurScore >= 18 ? 'caution' : 'safe'));
+    const heurColor = heurStatus === 'safe' ? '#4caf50' : (heurStatus === 'caution' ? '#ff9800' : '#f44336');
+    checks.push({
+      icon: '🧠',
+      name: 'Heuristic Analysis',
+      score: `${heurScore}/100 risk points`,
+      detail: `${heur.flags ? heur.flags.length : 0} flags detected`,
+      status: heurStatus,
+      color: heurColor
+    });
+  }
+  
+  // Google Safe Browsing
+  if (scanData.localScan && scanData.localScan.gsb && scanData.localScan.gsb.enabled) {
+    const gsb = scanData.localScan.gsb;
+    const gsbStatus = gsb.verdict === 'safe' ? 'safe' : 'unsafe';
+    const gsbColor = gsbStatus === 'safe' ? '#4caf50' : '#f44336';
+    checks.push({
+      icon: '🛡️',
+      name: 'Google Safe Browsing',
+      score: gsb.verdict.toUpperCase(),
+      detail: gsb.matches && gsb.matches.length > 0 ? `${gsb.matches.length} threats found` : 'No threats detected',
+      status: gsbStatus,
+      color: gsbColor
+    });
+  }
+  
+  // Blocklist Check
+  if (scanData.localScan && scanData.localScan.blocklist) {
+    const blocklist = scanData.localScan.blocklist;
+    const blockStatus = blocklist.match ? 'unsafe' : 'safe';
+    const blockColor = blockStatus === 'safe' ? '#4caf50' : '#f44336';
+    checks.push({
+      icon: '📋',
+      name: 'Blocklist Check',
+      score: blocklist.match ? 'BLOCKED' : 'CLEAN',
+      detail: blocklist.match ? `Match: ${blocklist.type}` : 'Not in blocklist',
+      status: blockStatus,
+      color: blockColor
+    });
+  }
+  
+  // DNS Check
+  if (scanData.localScan && scanData.localScan.dns && !scanData.localScan.dns.skipped) {
+    const dns = scanData.localScan.dns;
+    const dnsStatus = dns.ok ? 'safe' : 'unsafe';
+    const dnsColor = dnsStatus === 'safe' ? '#4caf50' : '#f44336';
+    checks.push({
+      icon: '🌐',
+      name: 'DNS Lookup',
+      score: dns.ok ? 'RESOLVED' : 'FAILED',
+      detail: dns.ok ? 'Domain resolves correctly' : dns.error || 'Resolution failed',
+      status: dnsStatus,
+      color: dnsColor
+    });
+  }
+  
+  // SSL/TLS Check
+  if (scanData.localScan && scanData.localScan.tls && !scanData.localScan.tls.skipped) {
+    const tls = scanData.localScan.tls;
+    const tlsStatus = tls.ok ? 'safe' : 'unsafe';
+    const tlsColor = tlsStatus === 'safe' ? '#4caf50' : '#f44336';
+    let tlsDetail = tls.ok ? 'Valid certificate' : 'Invalid certificate';
+    if (tls.daysToExpire !== null && tls.daysToExpire !== undefined) {
+      if (tls.daysToExpire < 0) {
+        tlsDetail = 'Certificate EXPIRED';
+      } else if (tls.daysToExpire <= 7) {
+        tlsDetail = `Expires in ${tls.daysToExpire} days ⚠️`;
+      } else {
+        tlsDetail = `Valid for ${tls.daysToExpire} days`;
+      }
+    }
+    checks.push({
+      icon: '🔒',
+      name: 'SSL/TLS Certificate',
+      score: tls.ok ? 'VALID' : 'INVALID',
+      detail: tlsDetail,
+      status: tlsStatus,
+      color: tlsColor
+    });
+  }
+  
+  // HTTP/HTTPS Check
+  if (scanData.localScan && scanData.localScan.http) {
+    const http = scanData.localScan.http;
+    const isHttps = http.finalUrl ? http.finalUrl.startsWith('https://') : false;
+    const httpStatus = isHttps ? 'safe' : 'caution';
+    const httpColor = httpStatus === 'safe' ? '#4caf50' : '#ff9800';
+    checks.push({
+      icon: '🔐',
+      name: 'Protocol Security',
+      score: isHttps ? 'HTTPS' : 'HTTP',
+      detail: isHttps ? 'Encrypted connection' : 'Unencrypted connection',
+      status: httpStatus,
+      color: httpColor
+    });
+  }
+  
+  // Render all checks
+  checks.forEach(check => {
+    html += `
+      <div style="background: ${cardBg}; border-left: 4px solid ${check.color}; padding: 15px; margin-bottom: 12px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,${isDarkMode ? '0.3' : '0.1'}); border: 1px solid ${cardBorder};">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <div style="flex: 1;">
+            <div style="font-weight: bold; color: ${textColor}; margin-bottom: 4px;">${check.icon} ${check.name}</div>
+            <div style="color: ${labelColor}; font-size: 14px;">${check.detail}</div>
+          </div>
+          <span style="background: ${check.color}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; white-space: nowrap; margin-left: 10px;">${check.score}</span>
+        </div>
+      </div>
+    `;
+  });
+  
+  // If no checks available
+  if (checks.length === 0) {
+    html += `<div style="text-align: center; color: ${labelColor}; padding: 20px;">No detailed scan data available</div>`;
+  }
+  
+  modalContent.innerHTML = html;
+  modal.appendChild(modalContent);
+  document.body.appendChild(modal);
+  
+  // Add CSS animations and styling
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+    .modal-close-btn:hover {
+      background: ${buttonHoverBg} !important;
+      color: ${isDarkMode ? '#e2e8f0' : '#333'} !important;
+    }
+    .details-modal-content::-webkit-scrollbar {
+      width: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-track {
+      background: ${isDarkMode ? '#0f172a' : '#f5f5f5'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb {
+      background: ${isDarkMode ? '#475569' : '#cbd5e1'};
+      border-radius: 10px;
+    }
+    .details-modal-content::-webkit-scrollbar-thumb:hover {
+      background: ${isDarkMode ? '#64748b' : '#94a3b8'};
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Close modal on overlay click or close button
+  const closeModal = () => {
+    modal.style.animation = 'fadeOut 0.2s ease';
+    setTimeout(() => {
+      document.body.removeChild(modal);
+      document.head.removeChild(style);
+    }, 200);
+  };
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  modalContent.querySelector('.modal-close-btn').addEventListener('click', closeModal);
 }
 
 // Override the existing setPageStatus function if it exists
@@ -3493,4 +4450,3 @@ if (document.readyState === 'loading') {
     }
   }, 100);
 }
-})();

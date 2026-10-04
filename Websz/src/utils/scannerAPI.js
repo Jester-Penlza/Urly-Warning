@@ -10,18 +10,21 @@ import { configManagerInstance } from '../config/useConfig';
  */
 export async function scanUrl(url) {
   const config = configManagerInstance.getAll();
-  let timeoutId;
+  const authToken = localStorage.getItem('urly_auth_token') || sessionStorage.getItem('urly_auth_token');
   
   try {
     const apiEndpoint = config.api.endpoint;
     const timeout = config.api.timeout;
     
     const controller = new AbortController();
-    timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
     
     const response = await fetch(apiEndpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
       body: JSON.stringify({ 
         url,
         options: {
@@ -38,6 +41,8 @@ export async function scanUrl(url) {
       }),
       signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       throw new Error(`Scan failed: ${response.statusText}`);
@@ -57,8 +62,6 @@ export async function scanUrl(url) {
       throw new Error('Scan timeout - URL took too long to analyze');
     }
     throw error;
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -78,17 +81,20 @@ export async function scanBatch(urls) {
     batches.push(urls.slice(i, i + batchSize));
   }
   
-  // Process batches with a real concurrency cap. Creating every promise before
-  // awaiting it starts every request at once, even when maxConcurrent is small.
+  // Process batches with concurrency control
   for (const batch of batches) {
+    const batchPromises = [];
+    
     for (let i = 0; i < batch.length; i += maxConcurrent) {
       const concurrent = batch.slice(i, i + maxConcurrent);
       const promises = concurrent.map(url => 
         scanUrl(url).catch(error => ({ url, error: error.message }))
       );
-      const concurrentResults = await Promise.all(promises);
-      results.push(...concurrentResults);
+      batchPromises.push(...promises);
     }
+    
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
   }
   
   return results;

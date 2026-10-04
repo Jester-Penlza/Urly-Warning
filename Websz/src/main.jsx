@@ -5,10 +5,6 @@ import App from './App'
 import { configManagerInstance } from './config/useConfig'
 import { initConfigSync } from './config/configSync'
 
-// GitHub Pages hosts only the static frontend. This flag lets the legacy page
-// controller skip local API calls and use its client-side checks immediately.
-window.URLY_STATIC_DEPLOYMENT = import.meta.env.VITE_STATIC_DEPLOYMENT === 'true';
-
 // Expose configManager to window for use by public/js/script.js
 window.configManager = {
   getConfig: () => configManagerInstance.getAll(),
@@ -22,7 +18,7 @@ window.configManager = {
   }
 };
 
-// Initialize config sync with database
+// Initialize config sync with backend runtime API
 initConfigSync();
 
 // Log config manager initialization
@@ -32,7 +28,7 @@ console.log('📊 Current config:', configManagerInstance.getAll());
 const root = ReactDOM.createRoot(document.getElementById('root'))
 root.render(
   // In dev, StrictMode double-invokes effects; disable to avoid duplicate bindings.
-  <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+  <HashRouter>
     <App />
   </HashRouter>
 )

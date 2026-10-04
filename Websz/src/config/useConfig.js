@@ -8,13 +8,9 @@ import { defaultConfig, configValidation } from './scannerConfig';
 
 const STORAGE_KEY = 'urlScanner_config_v2';
 
-function cloneConfig(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
 class ConfigManager {
   constructor() {
-    this.config = cloneConfig(defaultConfig);
+    this.config = { ...defaultConfig };
     this.listeners = [];
   }
 
@@ -62,30 +58,10 @@ class ConfigManager {
   }
 
   /**
-   * Apply related settings as one transaction. This avoids a render/storage
-   * cycle for every heuristic weight while the sensitivity slider moves.
-   */
-  setMany(updates) {
-    for (const [path, value] of Object.entries(updates)) {
-      const keys = path.split('.');
-      const lastKey = keys.pop();
-      let target = this.config;
-      for (const key of keys) {
-        if (!target[key]) target[key] = {};
-        target = target[key];
-      }
-      target[lastKey] = value;
-    }
-    this.saveToStorage();
-    this.notifyListeners();
-    return true;
-  }
-
-  /**
    * Reset configuration to defaults
    */
   reset() {
-    this.config = cloneConfig(defaultConfig);
+    this.config = { ...defaultConfig };
     this.saveToStorage();
     this.notifyListeners();
   }
@@ -202,7 +178,7 @@ class ConfigManager {
    * Get entire configuration
    */
   getAll() {
-    return cloneConfig(this.config);
+    return { ...this.config };
   }
 }
 
@@ -225,10 +201,6 @@ export function useConfig() {
     configManagerInstance.set(path, value);
   };
 
-  const updateConfigs = (updates) => {
-    configManagerInstance.setMany(updates);
-  };
-
   const resetConfig = () => {
     configManagerInstance.reset();
   };
@@ -248,7 +220,6 @@ export function useConfig() {
   return {
     config,
     updateConfig,
-    updateConfigs,
     resetConfig,
     exportConfig,
     importConfig,

@@ -7,10 +7,11 @@ export const defaultConfig = {
   // API Configuration
   api: {
     endpoint: 'http://localhost:5050/api/scan',
-    timeout: 12000,
+    timeout: 30000,
     retryAttempts: 2,
     googleSafeBrowsing: {
       enabled: true,
+      apiKey: '',
       threatTypes: [
         'MALWARE',
         'SOCIAL_ENGINEERING',
@@ -108,8 +109,6 @@ export const defaultConfig = {
     logLevel: 'info',          // 'debug', 'info', 'warn', 'error'
     collectAnonymousStats: false,
     enableExperimentalFeatures: false,
-    // Disabled by default: third-party HTML proxies disclose the scanned URL.
-    allowThirdPartyContentProxy: false,
     customBlocklist: [],
     customWhitelist: []
   }

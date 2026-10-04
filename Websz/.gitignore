@@ -9,6 +9,16 @@ coverage/
 *.log
 .DS_Store
 
+# Flutter-generated and machine-specific files
+urly_warning_flutter/.dart_tool/
+urly_warning_flutter/.idea/
+urly_warning_flutter/build/
+urly_warning_flutter/.flutter-plugins
+urly_warning_flutter/.flutter-plugins-dependencies
+urly_warning_flutter/android/.gradle/
+urly_warning_flutter/android/.kotlin/
+urly_warning_flutter/android/local.properties
+
 # Historical reports containing obsolete credential examples. Keep them local;
 # the runnable project and current setup instructions do not depend on them.
 API-DOCUMENTATION.md
