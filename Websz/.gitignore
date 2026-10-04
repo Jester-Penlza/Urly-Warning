@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+scanner.config.json
+database-exports/
+coverage/
+*.log
+.DS_Store
+
+# Historical reports containing obsolete credential examples. Keep them local;
+# the runnable project and current setup instructions do not depend on them.
+API-DOCUMENTATION.md
+API-STATUS.md
+GSB-STATUS-AND-DATABASE-UPDATE.md
+SUPABASE-VERIFICATION.md
+SYSTEM-STATUS.md
