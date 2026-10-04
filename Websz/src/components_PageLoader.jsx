@@ -5,9 +5,13 @@ export default function PageLoader({ pageFile }) {
 
   useEffect(() => {
     let cancelled = false;
+    const baseUrl = import.meta.env.BASE_URL || '/';
     async function load() {
       try {
-        const res = await fetch('/_pages/' + pageFile);
+        const res = await fetch(`${baseUrl}_pages/${pageFile}`);
+        if (!res.ok) {
+          throw new Error(`Unable to load ${pageFile} (HTTP ${res.status})`);
+        }
         const text = await res.text();
         // extract body content if present
         const m = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -18,6 +22,9 @@ export default function PageLoader({ pageFile }) {
           if (route === 'index') return 'href="#/"';
           return `href="#/${route}"`;
         });
+
+        // Public assets live under Vite's base path on GitHub Pages.
+        replaced = replaced.replace(/(["'])\/(?=(?:images|img|js|css)\/)/gi, `$1${baseUrl}`);
         
         // Also handle any remaining /contact.html links specifically
         replaced = replaced.replace(/href="\/contact\.html"/gi, 'href="#/contact"');
@@ -31,7 +38,7 @@ export default function PageLoader({ pageFile }) {
         if (prev) prev.remove();
         // dynamically load the original script so it initializes for the injected content
         const script = document.createElement('script');
-        script.src = `/js/script.js?v=${Date.now()}`;
+        script.src = `${baseUrl}js/script.js?v=${Date.now()}`;
         script.id = 'site-script';
         script.onload = function() {
           if (window.attachUIEventListeners) window.attachUIEventListeners();
