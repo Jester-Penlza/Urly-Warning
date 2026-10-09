@@ -33,14 +33,10 @@ export default function PageLoader({ pageFile }) {
         if (containerRef.current) {
           containerRef.current.innerHTML = replaced;
         }
-        // remove previous script if exists
-        const prev = document.getElementById('site-script');
-        if (prev) prev.remove();
-        // dynamically load the original script so it initializes for the injected content
-        const script = document.createElement('script');
-        script.src = `${baseUrl}js/script.js?v=${Date.now()}`;
-        script.id = 'site-script';
-        script.onload = function() {
+        // The legacy script declares global constants, so it must only be
+        // evaluated once. On later SPA routes we rebind it to the new markup.
+        const initializeInjectedPage = () => {
+          if (cancelled) return;
           if (window.attachUIEventListeners) window.attachUIEventListeners();
           if (window.attachSpollerListeners) window.attachSpollerListeners();
           if (window.initScanner) window.initScanner();
@@ -109,7 +105,24 @@ export default function PageLoader({ pageFile }) {
             console.log(`Contact button ${index + 1} setup complete`);
           });
         };
-        document.body.appendChild(script);
+
+        const existingScript = document.getElementById('site-script');
+        if (existingScript) {
+          if (existingScript.dataset.loaded === 'true') {
+            initializeInjectedPage();
+          } else {
+            existingScript.addEventListener('load', initializeInjectedPage, { once: true });
+          }
+        } else {
+          const script = document.createElement('script');
+          script.src = `${baseUrl}js/script.js`;
+          script.id = 'site-script';
+          script.onload = () => {
+            script.dataset.loaded = 'true';
+            initializeInjectedPage();
+          };
+          document.body.appendChild(script);
+        }
       } catch (err) {
         console.error('Failed to load page', pageFile, err);
       }

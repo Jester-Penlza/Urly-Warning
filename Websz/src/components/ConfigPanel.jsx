@@ -172,6 +172,14 @@ export default function ConfigPanel({ isOpen, onClose }) {
       reader.onload = (e) => {
         const success = importConfig(e.target.result);
         if (success) {
+          try {
+            const imported = JSON.parse(e.target.result);
+            const importedWeight = imported?.heuristics?.weights?.httpNotEncrypted;
+            const sensitivity = Math.round(((importedWeight ?? 100) / defaultWeights.httpNotEncrypted) * 100);
+            setSliderValue(Math.max(25, Math.min(200, sensitivity)));
+          } catch {
+            setSliderValue(100);
+          }
           alert('Configuration imported successfully!');
         } else {
           alert('Failed to import configuration. Please check the file format.');
@@ -184,6 +192,7 @@ export default function ConfigPanel({ isOpen, onClose }) {
   const handleReset = () => {
     if (confirm('Are you sure you want to reset all settings to defaults?')) {
       resetConfig();
+      setSliderValue(100);
       alert('Configuration reset to defaults!');
     }
   };

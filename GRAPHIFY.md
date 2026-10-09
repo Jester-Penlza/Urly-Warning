@@ -1,247 +1,514 @@
-# URLY Warning — Graphified Repository Map
+# URLY Warning — Repository Graph and Technical Guide
 
-> Token-efficient map of the workspace, generated from the checked-in files on 2026-10-04. Read this file first; open only the paths listed for the task at hand. Runtime/status reports are historical evidence, not guaranteed current state.
+> Detailed, token-efficient map of the current BASTE PROMAX codebase. Updated and path-checked on 2026-10-09 after BASTE PROMAX became the main repository version.
 
-## 1. Workspace at a glance
+## 1. What this repository contains
+
+URLY Warning is a URL-safety system with three related deliverables:
+
+1. **React/Vite website** — the primary browser interface and the version published through GitHub Pages.
+2. **Node/Express scanner service** — adds DNS, HTTP, TLS, denylist, optional Google Safe Browsing, configuration, cache, history, and authentication endpoints when run locally or on a server.
+3. **Flutter application** — a separate web/Android-oriented client that consumes the scanner/auth APIs and currently keeps its own login requirement.
+
+The runnable application root is `Websz/`. Files at the repository root provide repository-level documentation, security policy, and GitHub automation.
+
+### Current behavior at a glance
+
+| Area | Current behavior |
+|---|---|
+| Public website | Opens directly at `#/home`; web login and registration routes redirect to the home page. |
+| GitHub Pages | Deploys the static React/Vite frontend from `Websz/dist`. No Node server runs on GitHub Pages. |
+| Browser-only scans | Continue with client-side URL heuristics when the scanner service is unavailable. |
+| Full local scans | Use the Express service for DNS, HTTP, TLS, denylist, external-link, recommendation, and optional GSB checks. |
+| Scanner runtime data | Scan list, statistics, runtime config, and custom blocklist are held in memory and reset when the server restarts. |
+| Authentication storage | Defaults to a local encrypted-password store; Supabase auth/history can be selected with environment configuration. |
+| Flutter app | Still starts at `/login` and protects its application routes. This differs intentionally from the current website. |
+
+Live site: `https://jester-penlza.github.io/Urly-Warning/`
+
+## 2. Repository structure
 
 ```text
 URLYWARNING/
-├─ GRAPHIFY.md                 # this map
-├─ package-lock.json           # tiny root-level lockfile; main app is below
-└─ Websz/                      # actual application root
-   ├─ package.json             # npm scripts and dependencies
-   ├─ index.html               # Vite entry document
-   ├─ src/                     # React shell and current config UI
-   ├─ public/                  # legacy HTML/CSS/JS plus images
-   ├─ scan-server.js           # Express scanner/API server
-   ├─ db-manager.js            # Supabase persistence layer
-   ├─ db-routes.js             # HTTP-to-database route adapters
-   ├─ supabase-config.js       # active database client bootstrap
-   ├─ supabase-schema.sql      # active Supabase/PostgreSQL schema
-   ├─ feeds/                   # local denylist; generated feed may appear here
-   ├─ scripts/update-feeds.js  # downloads/normalizes public threat feeds
-   ├─ test-*.js                # integration/config/database scripts
-   ├─ database-exports/        # snapshots; large, usually skip
-   ├─ *.md                     # many historical reports/guides; open selectively
-   └─ node_modules/            # installed dependencies; never read for app context
+├─ .github/
+│  └─ workflows/deploy-pages.yml      # secure GitHub Pages build and deployment
+├─ GRAPHIFY.md                         # this repository guide
+├─ README.md                           # repository summary
+├─ SECURITY.md                         # security/reporting guidance
+└─ Websz/                              # canonical application root
+   ├─ package.json                     # Node/Vite scripts and dependencies
+   ├─ package-lock.json                # reproducible npm dependency lock
+   ├─ index.html                       # Vite entry document
+   ├─ vite.config.js                   # Vite configuration
+   ├─ .env.example                     # variable names only; never real secrets
+   ├─ .gitignore                       # secrets, builds, caches, local config
+   ├─ src/                             # React shell, routes, config UI, API helper
+   ├─ public/                          # injected page HTML, DOM controller, CSS, assets
+   ├─ scanner/                         # Express scanner service
+   ├─ database/                        # auth/history routes and Supabase client
+   ├─ config/                          # safe Supabase bootstrap; local scanner config is ignored
+   ├─ feeds/                           # local and generated threat lists
+   ├─ scripts/                         # secret scan and feed update tools
+   ├─ tests/                           # Node/manual integration test assets
+   ├─ docs/                            # API, configuration, testing, analysis, wireframes
+   ├─ utilities/                       # documentation/PDF helper scripts
+   └─ urly_warning_flutter/            # separate Flutter client
 ```
 
-Non-vendor inventory observed: 29 Markdown documents, 26 JavaScript files, 9 JSX files, 12 HTML files, 4 CSS files, 5 SQL files, 6 JSON files, 4 text files, and image/static assets. `public/` is asset-heavy; `scan-server.js` and `public/js/script.js` are the largest first-party code files.
+There are currently 221 tracked files under `Websz/`. The largest maintained areas are `public/` for the website assets, `urly_warning_flutter/` for the mobile client, `docs/` for technical material, and `src/` for the React shell.
 
-## 2. System graph
+Do not use `node_modules/`, `dist/`, Flutter `build/`, or `.dart_tool/` as implementation references. They are generated and ignored.
+
+## 3. High-level architecture
 
 ```mermaid
 flowchart LR
-    U[Browser user] --> V[Vite index.html]
-    V --> R[src/main.jsx]
-    R --> A[src/App.jsx]
-    A --> P[React routes: Home / About / Services / Contact]
-    P --> L[src/components_PageLoader.jsx]
-    L --> H[public/_pages/*.html]
-    L --> J[public/js/script.js]
-    J -->|POST /api/scan| S[scan-server.js :5050]
-    R --> C[src/config/useConfig.js]
-    C --> CP[src/components/ConfigPanel.jsx]
-    C --> CS[src/config/configSync.js]
-    CS -->|GET/POST /api/config| S
-    S --> HE[URL heuristics]
-    S --> DN[DNS + HTTP + TLS]
-    S --> BL[feeds/local-denylist.txt]
-    S --> GSB[Google Safe Browsing, optional]
-    S --> DR[db-routes.js]
-    S --> DM[db-manager.js]
-    DR --> DM
-    DM --> SB[(Supabase/PostgreSQL)]
-    SB --> T1[scans]
-    SB --> T2[scan_recommendations]
-    SB --> T3[scan_statistics]
-    SB --> T4[blocklist]
-    SB --> T5[configuration]
+    U[Website user] --> I[Websz/index.html]
+    I --> M[src/main.jsx]
+    M --> A[src/App.jsx]
+    A --> R[React hash routes]
+    R --> PL[src/components_PageLoader.jsx]
+    PL --> HP[public/_pages/*.html]
+    PL --> JS[public/js/script.js]
+    JS -->|POST /api/scan when available| API[scanner/scan-server.js :5050]
+    JS -->|server unavailable| BH[Browser heuristic fallback]
+    M --> CM[src/config/useConfig.js]
+    CM --> UI[src/components/ConfigPanel.jsx]
+    CM --> CS[src/config/configSync.js]
+    CS -->|GET/POST /api/config| API
+    API --> H[URL heuristics]
+    API --> N[DNS / HTTP / TLS]
+    API --> F[Threat feeds and custom blocklist]
+    API --> G[Optional Google Safe Browsing]
+    API --> MEM[(In-memory scans/config/stats)]
+    API --> DR[database/db-routes.js]
+    DR --> LA[(Local auth.json by default)]
+    DR -->|optional Supabase mode| DB[(Supabase tables)]
 ```
 
-### Scan request flow
+### Flutter architecture
+
+```mermaid
+flowchart LR
+    FM[Flutter main.dart] --> FA[app/app.dart]
+    FA --> FR[app/router.dart]
+    FR --> AU[features/auth]
+    FR --> HS[features/home]
+    HS --> SC[features/scan]
+    HS --> HI[features/history]
+    HS --> SE[features/settings]
+    SC --> NET[core/network/scanner_api_service.dart]
+    HI --> NET
+    AU --> NET
+    NET --> API[Express API]
+    SC --> SCORE[core/scoring/website_scoring.dart]
+```
+
+The website and Flutter application share the same backend contract but not the same route policy: website auth is bypassed, while Flutter auth remains active.
+
+## 4. Runtime modes
+
+### A. Static GitHub Pages mode
+
+GitHub Pages serves only the generated frontend.
+
+- Available: navigation, settings UI, browser storage, client-side URL heuristics, locally rendered breakdowns and recommendations.
+- Unavailable without a separately hosted API: DNS, server-side HTTP/TLS inspection, server threat feeds, GSB, server history, server cache, and auth endpoints.
+- `src/config/configSync.js` attempts `http://localhost:5050`; failure is caught and does not block the interface.
+- `public/js/script.js` falls back to browser analysis when `/api/scan` is unreachable.
+
+### B. Full local mode
+
+Run Vite and the Express scanner together. This enables the complete scanning pipeline and the runtime API.
+
+```powershell
+cd Websz
+npm install
+npm run dev:all
+```
+
+Default service endpoints:
+
+- Vite: normally `http://localhost:5173`; Vite selects another port when occupied.
+- Scanner/API: `http://localhost:5050`.
+- Health: `http://localhost:5050/health`.
+
+### C. Supabase-backed mode
+
+The database layer remains optional. Provide credentials through environment variables and set `URLY_AUTH_MODE=supabase` to use Supabase for auth/history routes. Without that flag, auth/history uses the local store even if Supabase variables exist.
+
+Required variable names are documented in `Websz/.env.example`. Never place real values in tracked files.
+
+## 5. Website frontend
+
+### React shell (`Websz/src/`)
+
+| File | Responsibility |
+|---|---|
+| `main.jsx` | Mounts React under `HashRouter`, exposes the configuration manager on `window`, and starts non-blocking runtime config sync. |
+| `App.jsx` | Defines `#/home`, `#/about`, `#/services`, and `#/contact`; redirects `/`, `/login`, `/register`, and unknown paths to `/home`. |
+| `components_PageLoader.jsx` | Fetches the selected HTML fragment using Vite's deployment base path, injects its body, rewrites navigation links, and loads `public/js/script.js`. |
+| `pages/Home.jsx` | Selects `_pages/index.html`. |
+| `pages/About.jsx` | Selects `_pages/about.html`. |
+| `pages/Services.jsx` | Selects `_pages/services.html`. |
+| `pages/Contact.jsx` | Selects `_pages/contact.html`. |
+| `pages/Login.jsx` and `Register.jsx` | Retained implementation files, but unreachable through current website routing. |
+| `components/ConfigButton.jsx` | Opens the global configuration panel. |
+| `components/ConfigPanel.jsx` | Edits scanning, security, display, and sensitivity settings. |
+| `config/scannerConfig.js` | Safe browser defaults and validation ranges; contains no API key. |
+| `config/useConfig.js` | LocalStorage-backed configuration manager and React hook. |
+| `config/configSync.js` | Maps selected browser settings to the runtime `/api/config` API. |
+| `utils/scannerAPI.js` | Modular API client, batching, and scan-cache helper. The production home page primarily uses `public/js/script.js`. |
+
+### Page content and browser controller (`Websz/public/`)
+
+| Path | Responsibility |
+|---|---|
+| `_pages/index.html` | Home page and scanner markup. |
+| `_pages/about.html` | About content. |
+| `_pages/services.html` | Services content. |
+| `_pages/contact.html` | Contact content. |
+| `js/script.js` | Main DOM controller, theme behavior, scan orchestration, browser fallback, result details, recommendations, and history UI. Search symbols before reading this large file. |
+| `js/result-display.js` | Supporting result presentation logic. |
+| `js/scanner-config.js`, `config-manager.js`, `config-ui.js` | Legacy/global configuration implementation used by static harnesses and portions of the injected UI. |
+| `css/style.css` | Primary site styling. |
+| `css/reset.css`, `color-harmony.css` | Supporting normalization and color rules. |
+| `images/`, `img/` | Logos, photography, illustrations, and contact icons. |
+| `*-test.html`, `api-test.html`, `design-showcase.html` | Manual browser harnesses; not production entry points. |
+
+### Browser persistence
+
+- `urlScanner_config_v2` — settings managed by `src/config/useConfig.js`.
+- `scannerHistory` — scanner results displayed by the main DOM controller.
+- `urly_scanner_input` — current textarea content in session storage.
+- `scan_cache_<url>` — modular API-client cache entries.
+- Theme, local allow/block lists, and training data also use local storage.
+- Old `urly_auth_*` values may still be read by retained helpers, but the website no longer requires them.
+
+## 6. Scanner service
+
+`Websz/scanner/scan-server.js` is the Express entry point. It imports the database router, loads configuration and feeds, performs scans, and exposes the runtime API on port `5050` by default.
+
+### Scan pipeline
 
 ```mermaid
 flowchart TD
-    A[POST /api/scan with URL + options] --> B{Valid HTTP/S URL?}
-    B -- no --> X[400]
-    B -- yes --> C[Normalize URL; check in-memory file + DB blocklists]
-    C --> D[Run fast URL heuristics]
-    D --> E{Fast-mode strong signal?}
-    E -- yes --> F[Return early verdict; save asynchronously]
-    E -- no --> G[Run DNS, HTTP and optional TLS in parallel]
-    G --> H{DNS failed while enabled?}
-    H -- yes --> I[Return failed/high-risk verdict; save asynchronously]
-    H -- no --> J[Heuristics on final URL + optional GSB]
-    J --> K[Compute scores, status, breakdown and recommendations]
-    K --> L[Return JSON; save scan and statistics asynchronously]
+    A[Receive URL and per-request options] --> B{Valid HTTP or HTTPS URL?}
+    B -- No --> X[Return 400]
+    B -- Yes --> C[Normalize URL]
+    C --> D[Check feeds and runtime blocklist]
+    D --> E[Run structural URL heuristics]
+    E --> F{Strong early risk signal?}
+    F -- Yes --> G[Create early verdict and recommendations]
+    F -- No --> H[Run DNS, HTTP and optional TLS checks]
+    H --> I[Inspect redirects and external links]
+    I --> J[Run optional GSB reputation lookup]
+    J --> K[Calculate risk/safety scores]
+    K --> L[Generate breakdown and recommendations]
+    G --> M[Save to in-memory scan history]
+    L --> M
+    M --> N[Optionally upsert scan cache to Supabase]
+    N --> O[Return JSON result]
 ```
 
-## 3. Minimal reading sets
+Important functions to search inside `scan-server.js`:
 
-| Task | Read first | Read only if needed |
-|---|---|---|
-| Understand/start the app | `Websz/package.json`, `Websz/README.md` | `Websz/vite.config.js`, `.env.example` |
-| Change routing/page shell | `Websz/src/App.jsx`, `Websz/src/components_PageLoader.jsx` | matching `Websz/src/pages/*.jsx` |
-| Change page content | matching `Websz/public/_pages/*.html` | `public/css/style.css`, `public/js/script.js` |
-| Change scanner UI behavior | `Websz/public/js/script.js` | `public/js/result-display.js`, `src/utils/scannerAPI.js` |
-| Change settings UI | `src/components/ConfigPanel.jsx`, `src/config/useConfig.js` | `src/config/scannerConfig.js`, `src/config/configSync.js` |
-| Change scan logic | relevant region of `Websz/scan-server.js` | `feeds/local-denylist.txt`, `scanner.config.json` (do not expose values) |
-| Change API/database routes | `Websz/scan-server.js` route block, `Websz/db-routes.js` | `Websz/db-manager.js` |
-| Change database schema | `Websz/supabase-schema.sql` | `db-manager.js`, `SUPABASE-MIGRATION.md` |
-| Test configuration behavior | `Websz/test-config-system.js` | `TESTING-REPORT.md`, `VERIFICATION_CHECKLIST.md` |
-| Test database behavior | `Websz/test-db-operations.js` | `test-db.js`, `view-*.js` |
-| Update threat feeds | `Websz/scripts/update-feeds.js` | `feeds/local-denylist.txt` |
+- `loadFeeds`, `loadConfig`, `loadDbConfig`
+- `checkGSB`
+- `dnsCheck`, `httpProbe`, `tlsCheck`, `extractExternalLinks`
+- `heuristics`, `categorizeUrl`
+- `generateScoreBreakdown`, `generateRecommendations`
+- the `POST /api/scan` route near the end of the file
 
-## 4. Source map
+### Threat and configuration inputs
 
-### Frontend shell (`Websz/src`)
-
-- `main.jsx` — mounts React with `HashRouter`, exposes the React config manager on `window`, starts database config sync.
-- `App.jsx` — declares `#/`, `#/about`, `#/services`, and `#/contact`; mounts the global settings button/panel.
-- `pages/*.jsx` — four thin wrappers that select an HTML fragment.
-- `components_PageLoader.jsx` — fetches `public/_pages/<page>.html`, injects its body, rewrites `.html` links to hash routes, then dynamically loads `public/js/script.js`.
-- `components/ConfigButton.jsx` — opens settings.
-- `components/ConfigPanel.jsx` + `.css` — React settings editor.
-- `config/scannerConfig.js` — default browser configuration and validation limits.
-- `config/useConfig.js` — localStorage-backed config manager plus React hook.
-- `config/configSync.js` — maps selected frontend paths to database config keys and syncs through `/api/config`.
-- `utils/scannerAPI.js` — modular scan/batch/cache client; the injected legacy page also contains its own scan behavior in `public/js/script.js`.
-
-### Legacy/static frontend (`Websz/public`)
-
-- `_pages/index.html` — home/scanner markup.
-- `_pages/about.html`, `services.html`, `contact.html` — other page bodies.
-- `js/script.js` — central DOM controller and scanner UI; very large, so search for a symbol before opening a range.
-- `js/result-display.js` — result renderer.
-- `js/scanner-config.js`, `js/config-manager.js`, `js/config-ui.js` — older/global configuration implementation used by static test pages and loaded by the home fragment.
-- `css/style.css` — primary styling; `reset.css` and `color-harmony.css` are supporting styles.
-- `images/` and `img/` — product artwork and placeholders; skip unless doing visual work.
-- `*-test.html`, `design-showcase.html`, `api-test.html` — manual browser harnesses, not production entry points.
-
-### Backend (`Websz` root)
-
-- `scan-server.js` — server bootstrap, feed/config refresh, scan engine, recommendations, score breakdown, all public HTTP routes, port `5050` by default.
-- `db-manager.js` — active Supabase data access for scans, recommendations, statistics, blocklist, and configuration.
-- `db-routes.js` — request/response adapters intended to call the data-access layer.
-- `supabase-config.js` — reads environment variables and creates the Supabase client.
-- `scanner.config.json` — optional server configuration/credential source; treat as sensitive.
-- `db-config.js`, `database-schema.sql`, `init-db.js` — older MySQL-oriented path; not connected to the current server and `mysql2` is not declared in `package.json`.
-
-### Data and operations
-
-- `supabase-schema.sql` — canonical schema for five tables: `scans`, `scan_recommendations`, `scan_statistics`, `blocklist`, `configuration`.
-- `database-exports/` — JSON/SQL snapshots and timestamped notes; do not load into context unless restoring or comparing data.
-- `export-database.cjs`, `import-database.cjs` — snapshot tooling.
-- `populate-blocklist.js`, `add-detection-sensitivity.js`, `enable-ssl-check.js` — one-off Supabase maintenance scripts.
-- `view-all-data.cjs`, `view-blocklist.js`, `view-recommendations.js` — inspection utilities.
-- `scripts/update-feeds.js` — produces `feeds/urls.txt`; that generated file was not present at mapping time. The server tolerates its absence and still loads `local-denylist.txt` plus the DB blocklist.
-
-## 5. HTTP surface
-
-Base URL: `http://localhost:5050`
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/scan` | Scan one HTTP/S URL with optional per-request settings |
-| GET | `/health` | Server/feed/GSB/database-config summary |
-| GET | `/api/scans/recent` | Recent scan history |
-| GET | `/api/scans/search?q=` | Search scan history |
-| GET | `/api/scans/:id` | One scan and related data |
-| GET | `/api/stats/today` | Today's aggregate statistics |
-| GET | `/api/stats/summary` | Summary statistics |
-| GET | `/api/stats/range?start=&end=` | Date-range statistics |
-| GET/POST | `/api/blocklist` | List/add entries |
-| DELETE | `/api/blocklist/:value` | Remove an entry |
-| GET | `/api/blocklist/check/:value` | Test an entry |
-| GET/POST | `/api/config` | Read/update synchronized config |
-| GET | `/api/config/:key` | Read one config key |
-| POST | `/api/cleanup/old-scans` | Delete old history |
-| POST | `/api/cleanup/enforce-limit` | Enforce history cap |
-
-## 6. Configuration and data precedence
-
-Server-side configuration resolves in this order:
+Configuration precedence for server values is:
 
 ```text
 environment variable
-  > Supabase configuration table
-    > Websz/scanner.config.json
+  > runtime override in memory
+    > local config/scanner.config.json
       > in-code default
 ```
 
-Browser settings originate in `src/config/scannerConfig.js`, persist under localStorage key `urlScanner_config_v2`, and selected keys sync to the backend through `src/config/configSync.js`.
+Threat sources are:
 
-Database access requires the Supabase environment values documented in `.env.example`. Never paste `.env`, `scanner.config.json`, API keys, service-role keys, or full exported database contents into prompts/logs.
+- `feeds/local-denylist.txt` — small manually maintained denylist.
+- `feeds/urls.txt` — generated/imported threat feed.
+- Runtime custom blocklist — managed through `/api/blocklist` and reset when the server restarts.
+- Optional Google Safe Browsing — enabled only when a server-side key is configured.
 
-## 7. Commands
+## 7. Authentication, cache, and history
 
-Run from `Websz/`:
+`Websz/database/db-routes.js` owns the auth/cache/history API. `Websz/database/db-manager.js` creates the optional Supabase client.
+
+### Default local auth mode
+
+- Active unless `URLY_AUTH_MODE=supabase` is set.
+- Stores data at `%USERPROFILE%\.urly-warning\auth.json` on Windows or the equivalent home directory elsewhere.
+- Passwords use bcrypt hashes; plaintext passwords are not stored.
+- Sessions use random tokens and expire after seven days.
+- The data file is created with restrictive permissions where supported.
+
+This local auth system remains available to API consumers and Flutter, although the React website currently bypasses login/register.
+
+### Supabase mode
+
+- `config/supabase-config.js` reads `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and optional `SUPABASE_SERVICE_KEY` from the environment.
+- `database/schemas/supabase-schema.sql` defines `users`, `sessions`, `scan_cache`, and `scan_history`.
+- Set `URLY_AUTH_MODE=supabase` to move auth/history routes from the local JSON store to Supabase.
+- The service role key is server-only and must never enter frontend code or Git history.
+
+### Storage boundary to remember
+
+The scanner's `/api/scans/*`, statistics, runtime config, and custom blocklist routes currently use the in-memory scanner store. The authenticated `/api/history*` and `/api/cache*` routes belong to `database/db-routes.js` and use local/Supabase persistence. These are related but separate data paths.
+
+## 8. HTTP API reference
+
+Base URL in local mode: `http://localhost:5050`
+
+### Scan and health
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/scan` | Scan one URL with optional per-request scanner settings. |
+| `GET` | `/health` | Report feed counts, GSB status, runtime mode, scan count, and config count. |
+
+### In-memory scanner operations
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/scans/recent` | Return recent in-memory scans. |
+| `GET` | `/api/scans/search?q=` | Search in-memory scan history. |
+| `GET` | `/api/scans/:id` | Return one in-memory scan. |
+| `GET` | `/api/stats/today` | Return today's in-memory statistics. |
+| `GET` | `/api/stats/summary` | Return summary statistics. |
+| `GET` | `/api/stats/range?start=&end=` | Return statistics for a date range. |
+| `GET` | `/api/blocklist` | List runtime custom blocklist entries. |
+| `POST` | `/api/blocklist` | Add a runtime blocklist entry. |
+| `DELETE` | `/api/blocklist/:value` | Remove an entry by value or ID. |
+| `GET` | `/api/blocklist/check/:value` | Check a value against the runtime blocklist. |
+| `GET` | `/api/config` | Read runtime configuration. |
+| `GET` | `/api/config/:key` | Read one runtime configuration value. |
+| `POST` | `/api/config` | Update one runtime configuration value. |
+| `POST` | `/api/cleanup/old-scans` | Trim in-memory history. |
+| `POST` | `/api/cleanup/enforce-limit` | Enforce the configured in-memory history cap. |
+
+### Authenticated/local-or-Supabase operations
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/auth/register` | Create a user. |
+| `POST` | `/auth/login` | Verify credentials and create a session. |
+| `POST` | `/auth/logout` | Delete the active session; bearer token required. |
+| `POST` | `/auth/refresh` | Replace an active session; bearer token required. |
+| `GET` | `/api/cache/check?url=` | Look up a cached result. |
+| `POST` | `/api/cache/store` | Store a cached result. |
+| `GET` | `/api/history` | Return the authenticated user's history. |
+| `POST` | `/api/history/add` | Add an authenticated history record. |
+| `GET` | `/api/history/:id` | Return one authenticated history record. |
+| `DELETE` | `/api/history/:id` | Delete one authenticated history record. |
+
+## 9. Flutter application
+
+The Flutter project is rooted at `Websz/urly_warning_flutter/`.
+
+| Area | Key files |
+|---|---|
+| App startup/routing | `lib/main.dart`, `lib/app/app.dart`, `lib/app/router.dart` |
+| Authentication | `lib/features/auth/*` |
+| Main navigation | `lib/features/home/home_shell_screen.dart` |
+| Scanning | `lib/features/scan/scan_screen.dart`, `scan_controller.dart` |
+| History | `lib/features/history/*` |
+| Settings/blocklist | `lib/features/settings/*` |
+| HTTP layer | `lib/core/network/api_client.dart`, `scanner_api_service.dart` |
+| Shared models | `lib/core/models/*` |
+| Client scoring | `lib/core/scoring/website_scoring.dart` |
+| Theme | `lib/core/theme/app_theme.dart` |
+
+Flutter routes currently are `/login`, `/register`, `/app`, and `/blocklist`. Its router redirects unauthenticated users to `/login`, unlike the React website.
+
+Generated Flutter directories and machine-specific files are ignored. Do not commit `.dart_tool/`, `build/`, `.idea/`, Android `.gradle/`, `.kotlin/`, or `local.properties`.
+
+## 10. Commands
+
+Run Node commands from `Websz/`:
 
 ```powershell
-npm install
-npm run dev        # Vite frontend
-npm run scan       # scanner/API on port 5050
-npm run dev:all    # Windows helper: frontend + backend
-npm run build      # production frontend build
-npm run preview    # preview built frontend
-npm run feeds:update
+npm install                 # install/update local dependencies
+npm ci                      # clean reproducible install, preferred in CI
+npm run dev                 # Vite frontend only
+npm run scan                # Express scanner/API only
+npm run dev:all             # Windows helper: scanner plus Vite
+npm run build               # production frontend build
+npm run preview             # preview the production build
+npm run test:web            # production-build browser E2E suite
+npm run security:check      # reject tracked secrets/private files
+npm run feeds:update        # refresh normalized threat feeds
 ```
 
-There is no unified `npm test` script. Tests are standalone Node scripts (for example `node test-config-system.js` and `node test-db-operations.js`) and may require the API, network, and Supabase credentials.
+Exact GitHub Pages build:
 
-## 8. Current maintenance notes
+```powershell
+$env:VITE_STATIC_DEPLOYMENT='true'
+npm run build -- --base=/Urly-Warning/
+```
 
-1. The route-to-database method mismatches, scan error scope issue, and browser-delivered Safe Browsing credential found during this audit were repaired on 2026-10-04.
-2. The frontend still has two overlapping configuration/scanner implementations (`src/config/*` and `public/js/*`). Confirm which path owns a behavior before editing.
-3. Supabase-backed history, statistics, blocklist, and config routes require working Supabase connectivity. Core URL scanning continues with local defaults when it is unavailable.
-4. `scanner.config.json` may contain a server-side credential and is now ignored alongside `.env`; do not expose or commit either file. Rotate any key that was previously shipped to a browser.
-5. Many Markdown reports describe a historical “working” or “production-ready” state. Prefer current code and verification over those claims.
+Flutter commands from `Websz/urly_warning_flutter/`:
 
-## 9. Documentation routing
+```powershell
+flutter pub get
+flutter test
+flutter run
+```
 
-Use these rather than loading all Markdown files:
+## 11. Testing and verification
 
-- General startup: `README.md`
-- API contract: `API-DOCUMENTATION.md`
-- Configuration: `CONFIGURATION-GUIDE.md` and `CONFIGURATION-SYSTEM.md`
-- Supabase setup/schema: `SUPABASE-SETUP.md`, `SUPABASE-REFERENCE.md`, `SUPABASE-MIGRATION.md`
-- Scanner rationale: `GSB-EXPLANATION.md`, `SSL-VALIDATION-EXPLANATION.md`, `RECOMMENDATION-LEVELS-EXPLAINED.md`
-- Architecture/process material: `SYSTEM-FLOW-DIAGRAM.md`, `SYSTEM-ANALYSIS-BPMN-COMPLETE.md`
-- Historical validation only: `API-STATUS.md`, `API-WORKING-CONFIRMATION.md`, `SYSTEM-STATUS*.md`, `PRODUCTION-READY-REPORT.md`, `TESTING-REPORT.md`, `UPDATE-SUMMARY.md`
+There is no single all-platform `npm test` script. Use checks appropriate to the change:
 
-## 10. Token-efficient workflow
+| Change | Minimum verification |
+|---|---|
+| Any tracked-file update | `npm run security:check` |
+| React/public frontend | `npm run test:web`; builds with the GitHub base path and checks routes, redirects, theme/sensitivity behavior, reset, scanning, details, recommendations, history, display controls, and restart in headless Chromium |
+| Scanner logic | Start `npm run scan`; check `/health`; exercise `POST /api/scan` with safe and suspicious URLs |
+| Config behavior | Run `node tests/test-config-system.js` with the service available |
+| Integration behavior | Run `node tests/test-integration.js` and use `tests/verify-integration.html` as needed |
+| Flutter code | `flutter test`; run the intended web/Android target |
+| Deployment | Confirm the GitHub Actions Pages workflow and load the live site without a cache-busting query |
 
-1. Start with this file and choose one row from **Minimal reading sets**.
-2. Search symbols before opening large files, for example:
+Useful test inputs are in `tests/test-urls.txt`, `tests/phishing-test-urls.txt`, and `tests/verified-test-urls.txt`. Treat outside URLs as untrusted and do not enter real credentials into test pages.
+
+## 12. GitHub Pages deployment
+
+`.github/workflows/deploy-pages.yml` runs on pushes to `main` and manual dispatches.
+
+```mermaid
+flowchart LR
+    P[Push to main] --> C[Checkout]
+    C --> N[Set up Node]
+    N --> S[npm run security:check]
+    S --> I[npm ci]
+    I --> B[Vite build with /Urly-Warning/ base]
+    B --> U[Upload Websz/dist]
+    U --> D[Deploy GitHub Pages]
+```
+
+The workflow publishes static files only. Deploying the Express scanner requires a separate server/runtime and environment-secret configuration.
+
+`components_PageLoader.jsx` must use `import.meta.env.BASE_URL` for fetched page fragments, scripts, and images. Root-relative paths such as `/_pages/index.html` break under the `/Urly-Warning/` GitHub Pages subpath.
+
+## 13. Security rules
+
+1. Never commit `.env`, `.env.*` except `.env.example`, `config/scanner.config.json`, database exports, tokens, passwords, API keys, or service-role credentials.
+2. Run `npm run security:check` after staging and before every push.
+3. Google Safe Browsing credentials belong only on the scanner server. A Vite/browser variable is public even when its name contains `SECRET`.
+4. Use `SUPABASE_SERVICE_KEY` only in a trusted server process. Prefer least-privileged keys.
+5. Keep local auth data outside the repository at `.urly-warning/auth.json`.
+6. Do not commit generated Node, Vite, Flutter, Android, or IDE output.
+7. Treat scanned pages, redirects, remote HTML, feed data, and imported configuration as untrusted input.
+8. Historical documentation may contain obsolete examples or claims; current source and verification results take precedence.
+
+## 14. Documentation guide
+
+| Need | Start here |
+|---|---|
+| Installation and transfer | `APP-SETUP-GUIDE.md`, `TRANSFER-SETUP-README.md`, `INTEGRATION-QUICK-START.md` |
+| Repository organization | `FILE-ORGANIZATION.md`, `PROJECT-ORGANIZATION.md`, `REORGANIZATION-SUMMARY.md` |
+| API details | `docs/api/API-DOCUMENTATION.md` |
+| Configuration | `docs/configuration/CONFIGURATION-GUIDE.md`, `CONFIGURATION-SYSTEM.md` |
+| GSB and scoring rationale | `docs/GSB-EXPLANATION.md`, `GSB-IMPACT-ANALYSIS.md`, `RECOMMENDATION-LEVELS-EXPLAINED.md` |
+| Scanner fixes | `docs/CAUTION-STATUS-FIX.md`, `RECOMMENDATION-BUG-FIX.md` |
+| System diagrams/status history | `docs/system-analysis/` |
+| Test evidence | `docs/testing/` |
+| Wireframes | `docs/wireframes/` |
+| Database setup | `DATABASE-INTEGRATION-GUIDE.md`, `database/schemas/supabase-schema.sql` |
+| Flutter design/migration | `FLUTTER-WEB-ANDROID-FUNCTIONAL-SPEC.md`, `FLUTTER-MIGRATION-TODO.md` |
+
+Documents with words such as “complete,” “working,” or “production-ready” are historical snapshots, not automatic proof of the current build.
+
+## 15. Task-oriented reading map
+
+| Task | Read first | Then inspect only if needed |
+|---|---|---|
+| Change web routes | `src/App.jsx` | matching `src/pages/*.jsx` |
+| Change page content | matching `public/_pages/*.html` | matching selectors in `public/css/style.css` |
+| Fix theme or navigation | `public/js/script.js` | `components_PageLoader.jsx`, `ConfigPanel.jsx` |
+| Change result breakdowns | result/render functions in `public/js/script.js` | `scanner/scan-server.js` score and recommendation functions |
+| Change scanner checks | matching function in `scanner/scan-server.js` | `src/config/scannerConfig.js`, feeds |
+| Change browser settings | `src/components/ConfigPanel.jsx`, `src/config/useConfig.js` | `src/config/configSync.js` |
+| Change auth/history | `database/db-routes.js` | `database/db-manager.js`, schema, Flutter auth service |
+| Change Supabase schema | `database/schemas/supabase-schema.sql` | all callers in `database/db-routes.js` |
+| Change GitHub deployment | `.github/workflows/deploy-pages.yml` | `vite.config.js`, `components_PageLoader.jsx`, `index.html` |
+| Change Flutter scanning | `urly_warning_flutter/lib/features/scan/*` | `lib/core/network/*`, `lib/core/scoring/*` |
+| Change Flutter routing | `urly_warning_flutter/lib/app/router.dart` | `features/auth/*`, `features/home/*` |
+| Update threat feeds | `scripts/update-feeds.js` | `feeds/urls.txt`, server `loadFeeds` |
+
+## 16. Known maintenance considerations
+
+1. The React auth pages remain in source but are intentionally bypassed by `App.jsx`; Flutter still requires authentication.
+2. The production web scanner has two overlapping client implementations: the active injected-page controller in `public/js/script.js` and the modular helper in `src/utils/scannerAPI.js`. Confirm the actual caller before editing.
+3. Browser configuration also has a React implementation and legacy global scripts. Changes may need coordination across both paths.
+4. GitHub Pages does not host the Express backend. Server-only scan results cannot appear online unless a separate API is deployed and the frontend endpoint is changed.
+5. Runtime scanner history/config/blocklist is memory-backed. Restarting the server clears it.
+6. Authenticated history/cache is a separate local-or-Supabase subsystem in `database/db-routes.js`.
+7. `src/config/configSync.js` currently targets `http://localhost:5050` directly.
+8. `Websz/README.md` contains an old absolute example path; always run commands from the current repository's `Websz/` directory.
+
+## 17. Token-efficient repository workflow
+
+1. Read this file first.
+2. Choose one row from the task-oriented reading map.
+3. Search before opening large files:
 
    ```powershell
-   rg -n "searchTerm" Websz/scan-server.js Websz/public/js/script.js
+   rg -n "symbol-or-text" Websz/scanner/scan-server.js Websz/public/js/script.js
    ```
 
-3. Read narrow line ranges around matches instead of whole files.
-4. Exclude `node_modules/`, `database-exports/`, images, lockfiles, and historical reports unless the task explicitly needs them.
-5. For backend work, inspect `scan-server.js` plus only the directly called DB/config module.
-6. For page work, inspect the matching `_pages/*.html`, then only the relevant CSS/JS selector or function.
-7. Re-run searches against current code; do not trust line numbers quoted by old reports.
+4. Read only the surrounding function or route.
+5. Ignore generated dependencies, builds, images, lockfiles, exports, and historical reports unless the task needs them.
+6. Verify current source instead of relying on line numbers or status claims in old reports.
+7. After structural changes, update this Graphify guide so its paths and architecture remain trustworthy.
 
 ### Suggested context packets
 
 ```text
-UI page packet:
-  src/App.jsx
-  src/components_PageLoader.jsx
-  public/_pages/<page>.html
-  matching selectors/functions from public/css/style.css and public/js/script.js
+Web page packet
+  Websz/src/App.jsx
+  Websz/src/components_PageLoader.jsx
+  Websz/public/_pages/<page>.html
+  matching CSS selectors and script.js functions
 
-Scanner packet:
-  scan-server.js::<matched functions + /api/scan route>
-  feeds/local-denylist.txt (only if blocklist-related)
-  src/config/scannerConfig.js (only if option/weight-related)
+Scanner packet
+  matching functions in Websz/scanner/scan-server.js
+  Websz/src/config/scannerConfig.js when settings are involved
+  Websz/feeds/* only for threat-list behavior
 
-Database packet:
-  scan-server.js::<relevant route>
-  db-routes.js::<matching adapter>
-  db-manager.js::<matching data method>
-  supabase-schema.sql::<matching table>
+Auth/history packet
+  Websz/database/db-routes.js
+  Websz/database/db-manager.js
+  Websz/database/schemas/supabase-schema.sql
+
+Flutter packet
+  matching Websz/urly_warning_flutter/lib/features/<feature>/ files
+  the directly used core/network, model, scoring, or router files
+
+Deployment packet
+  .github/workflows/deploy-pages.yml
+  Websz/index.html
+  Websz/src/components_PageLoader.jsx
+  Websz/vite.config.js
 ```
+
+## 18. Source-of-truth rule
+
+When this guide, a historical report, and the running code disagree, trust them in this order:
+
+```text
+verified current behavior
+  > current source code and configuration
+    > current automated checks
+      > this Graphify guide
+        > historical documentation
+```
+
+Update `GRAPHIFY.md` whenever folders move, runtime boundaries change, routes are added or removed, or deployment behavior changes.

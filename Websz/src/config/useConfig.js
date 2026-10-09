@@ -8,9 +8,14 @@ import { defaultConfig, configValidation } from './scannerConfig';
 
 const STORAGE_KEY = 'urlScanner_config_v2';
 
+// Configuration values are plain JSON data. Always clone them so changing a
+// nested setting never mutates defaultConfig (which would make Reset keep the
+// user's previous values instead of restoring the real defaults).
+const cloneConfig = (value) => JSON.parse(JSON.stringify(value));
+
 class ConfigManager {
   constructor() {
-    this.config = { ...defaultConfig };
+    this.config = cloneConfig(defaultConfig);
     this.listeners = [];
   }
 
@@ -61,7 +66,7 @@ class ConfigManager {
    * Reset configuration to defaults
    */
   reset() {
-    this.config = { ...defaultConfig };
+    this.config = cloneConfig(defaultConfig);
     this.saveToStorage();
     this.notifyListeners();
   }
@@ -178,7 +183,7 @@ class ConfigManager {
    * Get entire configuration
    */
   getAll() {
-    return { ...this.config };
+    return cloneConfig(this.config);
   }
 }
 

@@ -25,7 +25,9 @@ function attachUIEventListeners() {
   
   function applyTheme(mode) {
     const isDark = mode === "dark";
-    document.body.classList.toggle("theme-dark", isDark);
+    document.body.classList.remove("theme-light", "theme-dark", "theme-auto");
+    document.body.classList.add(isDark ? "theme-dark" : "theme-light");
+    document.body.style.colorScheme = isDark ? "dark" : "light";
     
     // Update theme toggle button text
     const toggleEl = document.getElementById("themeToggle");
@@ -2870,10 +2872,11 @@ window.updateDisplayFromConfig = function() {
       }
     });
     
-    // Apply color scheme - BUT don't override manual theme toggle
-    // Skip if user has manually set theme preference
+    // Apply a config color scheme only when that setting actually changes.
+    // Sensitivity and other config updates must not disturb the active theme.
     const manualThemePreference = localStorage.getItem('themePreference');
-    if (colorScheme && !manualThemePreference) {
+    const colorSchemeChanged = window.__lastConfigColorScheme !== colorScheme;
+    if (colorScheme && !manualThemePreference && colorSchemeChanged) {
       const body = document.body;
       body.classList.remove('theme-light', 'theme-dark', 'theme-auto');
       
@@ -2885,10 +2888,12 @@ window.updateDisplayFromConfig = function() {
         body.style.colorScheme = 'dark';
       } else if (colorScheme === 'auto') {
         body.classList.add('theme-auto');
-        body.style.colorScheme = 'light dark';
-        // Let CSS prefer-color-scheme handle it
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        body.classList.toggle('theme-dark', prefersDark);
+        body.style.colorScheme = prefersDark ? 'dark' : 'light';
       }
     }
+    window.__lastConfigColorScheme = colorScheme;
     
     console.log('✅ Display updated from config:', {
       showDetailedAnalysis,
