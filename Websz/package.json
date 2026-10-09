@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:web": "vite build --base=/Urly-Warning/ && node ./tests/test-web-e2e.js",
+    "test:deployment": "node ./tests/test-static-deployment-e2e.js",
     "security:check": "node ./scripts/check-public-secrets.mjs",
     "feeds:update": "node ./scripts/update-feeds.js"
   },

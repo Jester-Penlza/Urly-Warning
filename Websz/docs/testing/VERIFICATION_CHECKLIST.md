@@ -109,7 +109,7 @@ window.configManager.set('display.showScoreBreakdown', false);
 // Should hide all Score Breakdown sections immediately
 
 // 6. Verify localStorage
-console.log('Stored config:', JSON.parse(localStorage.getItem('urlScanner_config_v2')));
+console.log('Stored config:', JSON.parse(localStorage.getItem('urlScanner_config_v3')));
 // Should show persisted config object
 ```
 
@@ -169,7 +169,7 @@ console.log(typeof window.updateDisplayFromConfig)
 **Debug:**
 ```javascript
 // Check localStorage
-localStorage.getItem('urlScanner_config_v2')
+localStorage.getItem('urlScanner_config_v3')
 // Should show JSON string
 
 // Check if save is working

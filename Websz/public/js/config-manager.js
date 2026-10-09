@@ -7,7 +7,8 @@ class ConfigManager {
   constructor() {
     this.config = null;
     this.defaultConfig = null;
-    this.storageKey = 'urlScanner_config_v2';
+    this.storageKey = 'urlScanner_config_v3';
+    this.legacyStorageKey = 'urlScanner_config_v2';
     this.listeners = [];
     
     // Listen for storage changes from other tabs/components
@@ -185,6 +186,20 @@ class ConfigManager {
       if (saved) {
         console.log('📥 Loaded user configuration from localStorage');
         return JSON.parse(saved);
+      }
+
+      const legacySaved = localStorage.getItem(this.legacyStorageKey);
+      if (legacySaved) {
+        const migrated = JSON.parse(legacySaved);
+        migrated.display = {
+          ...(migrated.display || {}),
+          showDetailedAnalysis: true,
+          showScoreBreakdown: true,
+          showRecommendations: true
+        };
+        localStorage.setItem(this.storageKey, JSON.stringify(migrated));
+        console.log('📥 Migrated configuration and restored result details');
+        return migrated;
       }
     } catch (error) {
       console.error('Failed to load config from storage:', error);

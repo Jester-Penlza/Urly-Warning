@@ -94,6 +94,7 @@ Open the URL printed by Vite. The website starts at `#/home`; `/login`, `/regist
 | `npm run build` | Create a production frontend build |
 | `npm run preview` | Preview the current production build |
 | `npm run test:web` | Build and run browser end-to-end checks |
+| `npm run test:deployment` | Verify the live static site's fallback scan and complete breakdown |
 | `npm run security:check` | Check tracked files for secrets/private artifacts |
 | `npm run feeds:update` | Refresh normalized public threat feeds |
 
@@ -107,6 +108,7 @@ The browser end-to-end suite checks:
 - Configuration reset behavior
 - A live scan with details, score breakdown, recommendations, and history
 - Display-setting toggles and scanner restart
+- Migration of older saved settings that accidentally hid result sections
 
 With dependencies installed, run:
 

@@ -178,7 +178,7 @@ Required variable names are documented in `Websz/.env.example`. Never place real
 
 ### Browser persistence
 
-- `urlScanner_config_v2` — settings managed by `src/config/useConfig.js`.
+- `urlScanner_config_v3` — current settings managed by `src/config/useConfig.js`; old v2 settings are migrated once with result details restored.
 - `scannerHistory` — scanner results displayed by the main DOM controller.
 - `urly_scanner_input` — current textarea content in session storage.
 - `scan_cache_<url>` — modular API-client cache entries.
@@ -343,6 +343,7 @@ npm run dev:all             # Windows helper: scanner plus Vite
 npm run build               # production frontend build
 npm run preview             # preview the production build
 npm run test:web            # production-build browser E2E suite
+npm run test:deployment     # live static-fallback breakdown test
 npm run security:check      # reject tracked secrets/private files
 npm run feeds:update        # refresh normalized threat feeds
 ```
@@ -370,6 +371,7 @@ There is no single all-platform `npm test` script. Use checks appropriate to the
 |---|---|
 | Any tracked-file update | `npm run security:check` |
 | React/public frontend | `npm run test:web`; builds with the GitHub base path and checks routes, redirects, theme/sensitivity behavior, reset, scanning, details, recommendations, history, display controls, and restart in headless Chromium |
+| Live static fallback | `npm run test:deployment`; scans without the local API and requires detail rows, score cards, recommendations, and visible migrated display settings |
 | Scanner logic | Start `npm run scan`; check `/health`; exercise `POST /api/scan` with safe and suspicious URLs |
 | Config behavior | Run `node tests/test-config-system.js` with the service available |
 | Integration behavior | Run `node tests/test-integration.js` and use `tests/verify-integration.html` as needed |

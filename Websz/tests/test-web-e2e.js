@@ -130,7 +130,7 @@ async function run() {
   });
   await page.waitForFunction(() => document.querySelector('.slider-current')?.textContent?.includes('175%'));
   const afterSlider = await page.evaluate(() => {
-    const config = JSON.parse(localStorage.getItem('urlScanner_config_v2'));
+    const config = JSON.parse(localStorage.getItem('urlScanner_config_v3'));
     return {
       isDark: document.body.classList.contains('theme-dark'),
       isLight: document.body.classList.contains('theme-light'),
@@ -149,7 +149,7 @@ async function run() {
   });
   await clickButtonByText(page, '.config-footer button', 'Reset to Defaults');
   await page.waitForFunction(() => document.querySelector('.slider-current')?.textContent?.includes('100%'));
-  const resetWeight = await page.evaluate(() => JSON.parse(localStorage.getItem('urlScanner_config_v2')).heuristics.weights.httpNotEncrypted);
+  const resetWeight = await page.evaluate(() => JSON.parse(localStorage.getItem('urlScanner_config_v3')).heuristics.weights.httpNotEncrypted);
   assert(resetWeight === 100, `Reset retained a mutated default weight: ${resetWeight}`);
   console.log('PASS theme toggle, sensitivity cap, theme isolation, and true default reset');
 

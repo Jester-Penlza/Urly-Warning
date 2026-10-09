@@ -139,7 +139,7 @@ Control what information is shown in scan results:
 ## 🔄 Configuration Persistence
 
 - **Saved to**: Browser localStorage
-- **Key**: `urlScanner_config_v2`
+- **Key**: `urlScanner_config_v3` (v2 is migrated automatically)
 - **Automatic**: Every change is saved instantly
 - **Per Browser**: Each browser/device has its own settings
 - **Survives**: Page refreshes, browser restarts

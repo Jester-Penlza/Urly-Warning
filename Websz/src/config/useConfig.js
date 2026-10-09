@@ -6,7 +6,8 @@
 import { useState, useEffect } from 'react';
 import { defaultConfig, configValidation } from './scannerConfig';
 
-const STORAGE_KEY = 'urlScanner_config_v2';
+const STORAGE_KEY = 'urlScanner_config_v3';
+const LEGACY_STORAGE_KEY = 'urlScanner_config_v2';
 
 // Configuration values are plain JSON data. Always clone them so changing a
 // nested setting never mutates defaultConfig (which would make Reset keep the
@@ -138,7 +139,24 @@ class ConfigManager {
   loadFromStorage() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
+      if (saved) return JSON.parse(saved);
+
+      // v2 could retain display flags disabled by the earlier UI bug. Preserve
+      // the user's scanner choices while restoring the result sections once.
+      const legacySaved = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacySaved) {
+        const migrated = JSON.parse(legacySaved);
+        migrated.display = {
+          ...(migrated.display || {}),
+          showDetailedAnalysis: true,
+          showScoreBreakdown: true,
+          showRecommendations: true,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        return migrated;
+      }
+
+      return null;
     } catch (error) {
       console.error('Failed to load configuration:', error);
       return null;
